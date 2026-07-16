@@ -1,5 +1,16 @@
-GNOMOBOY — Shards of the Mountain Heart (v3.0.1)
+GNOMOBOY — Shards of the Mountain Heart (v3.1.0)
 ======================================
+
+What's new in 3.1:
+  - Join from Discord: host an "Open" session and friends can jump in straight
+    from your Discord status — the game receives the invite and connects
+    automatically (LAN / Radmin VPN / internet). Pick Open or Private when
+    creating a server.
+  - Discord Rich Presence now shows party size, cover art, and (Open sessions)
+    a Join button. Set your own Discord Application ID in Settings if you like.
+  - A batch of stability and balance fixes: hired mages can now die properly and
+    no longer take friendly fire, level-ups no longer soft-lock a downed
+    teammate, sturdier server-side anti-cheat, and various smaller fixes.
 
 Patch 3.0.1:
   - Cutscene subtitles used to flash by too fast to read — their on-screen
