@@ -2,7 +2,7 @@
 
 A co-op 3D action game built with **Godot 4.7**: you are a knight facing hordes of surprisingly well-organized gnomes. Single-player and full multiplayer — PvE co-op and PvP — with **Windows ↔ Linux crossplay**, positional voice chat, and a 6-chapter story campaign with three endings.
 
-**Current version: 3.0.2** · [Play on itch.io](https://itch.io) (search "Gnome Slayer") · Assets: CC0 by [Kay Lousberg](https://kaylousberg.com)
+**Current version: 3.0.3** · [Play on itch.io](https://itch.io) (search "Gnome Slayer") · Assets: CC0 by [Kay Lousberg](https://kaylousberg.com)
 
 ![Meadow](promo/shot_meadow.png)
 
@@ -44,7 +44,7 @@ A co-op 3D action game built with **Godot 4.7**: you are a knight facing hordes 
 - **24 lore fragments** scattered across ruins, standing stones, crypts and battlefields.
 - **Hero persistence** — 3 save slots; in multiplayer every player brings their own knight from their own slot.
 - **Localization**: English, Ukrainian, Russian — switchable at runtime.
-- **Discord Rich Presence** out of the box on Windows and Linux (chapter/wave, party size, session time, Go Live button).
+- **Discord Rich Presence** out of the box on Windows and Linux (chapter/wave, party size, session time). Ships with a built-in Application ID; you can set your own in Settings → General. For Discord's "Go Live" stream button to target the game, add it once under Discord → Settings → Registered Games → "Add it!".
 - **Performance controls**: FSR2 render scale, MSAA, SSAO/bloom toggles, shadow quality.
 
 ## Controls

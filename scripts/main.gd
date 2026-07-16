@@ -784,6 +784,34 @@ func _build_settings_content() -> TabContainer:
 	dc_check.toggled.connect(func(on: bool):
 		Settings.discord_enabled = on
 		Settings.apply_and_save())
+	# свой Application ID (discord.com/developers) — под ним Discord покажет имя
+	# твоего приложения; пусто = встроенный ID по умолчанию
+	var dc_id_row := HBoxContainer.new()
+	dc_id_row.add_theme_constant_override("separation", 10)
+	t_common.add_child(dc_id_row)
+	var dc_id_lbl := Label.new()
+	dc_id_lbl.text = tr("Discord Application ID:")
+	dc_id_lbl.add_theme_font_size_override("font_size", 17)
+	dc_id_lbl.custom_minimum_size = Vector2(240, 0)
+	dc_id_row.add_child(dc_id_lbl)
+	var dc_id_edit := LineEdit.new()
+	dc_id_edit.text = Settings.discord_app_id
+	dc_id_edit.placeholder_text = tr("свой ID или пусто")
+	dc_id_edit.custom_minimum_size = Vector2(280, 34)
+	dc_id_row.add_child(dc_id_edit)
+	dc_id_edit.text_changed.connect(func(t: String):
+		Settings.discord_app_id = t.strip_edges())
+	dc_id_edit.text_submitted.connect(func(_t: String):
+		Settings.apply_and_save())
+	dc_id_edit.focus_exited.connect(func():
+		Settings.apply_and_save())
+	var dc_hint := Label.new()
+	dc_hint.text = tr("Для кнопки трансляции добавь игру в Discord: Настройки → Зарегистрированные игры → «Добавьте её!».")
+	dc_hint.add_theme_font_size_override("font_size", 12)
+	dc_hint.add_theme_color_override("font_color", Color(0.7, 0.7, 0.72))
+	dc_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	dc_hint.custom_minimum_size = Vector2(540, 0)
+	t_common.add_child(dc_hint)
 
 	# --- Графика ---
 	var t_gfx := VBoxContainer.new()

@@ -473,3 +473,6 @@ paste its Application ID — Discord will show your status and the Go Live butto
 "Открыто: %d из %d  ·  лор карты: %d из %d","Открыто: %d из %d  ·  лор карты: %d из %d","Відкрито: %d з %d  ·  лор карти: %d з %d","Unlocked: %d of %d  ·  map lore: %d of %d"
 "Прочитай все фрагменты лора в мире","Прочитай все фрагменты лора в мире","Прочитай усі фрагменти лору у світі","Read every lore fragment in the world"
 "Открыто: %d из %d  ·  лор мира: %d из %d","Открыто: %d из %d  ·  лор мира: %d из %d","Відкрито: %d з %d  ·  лор світу: %d з %d","Unlocked: %d of %d  ·  world lore: %d of %d"
+"Discord Application ID:","Discord Application ID:","Discord Application ID:","Discord Application ID:"
+"свой ID или пусто","свой ID или пусто","свій ID або порожньо","your ID or leave empty"
+"Для кнопки трансляции добавь игру в Discord: Настройки → Зарегистрированные игры → «Добавьте её!».","Для кнопки трансляции добавь игру в Discord: Настройки → Зарегистрированные игры → «Добавьте её!».","Для кнопки трансляції додай гру в Discord: Налаштування → Зареєстровані ігри → «Додайте її!».","For the stream button, add the game in Discord: Settings → Registered Games → ""Add it!""."

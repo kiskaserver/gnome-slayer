@@ -51,6 +51,8 @@ var _pending: Dictionary = {}
 var _update := 0.0
 var _start_ts := 0
 var _bridge_pid := -1
+var _client_id := APP_ID       # активный Application ID (свой из настроек или встроенный)
+var _pipe_ref: FileAccess = null  # общая ссылка на канал — чтобы разблокировать чтение при выходе
 
 
 func _ready() -> void:
@@ -65,13 +67,17 @@ func _exit_tree() -> void:
     if _thread != null:
         _mutex.lock()
         _quit = true
-        _mutex.unlock()
-        # мост убиваем сразу — это разблокирует чтение в воркере
-        _mutex.lock()
         var pid := _bridge_pid
+        var pipe := _pipe_ref
         _mutex.unlock()
+        # разблокируем возможное зависшее чтение в воркере, чтобы игра не висла
+        # при выходе, если Discord перестал отвечать:
+        #  - Linux: убиваем мост-процесс (закрывает сокет)
+        #  - Windows: закрываем сам канал (ReadFile в воркере вернёт ошибку)
         if pid > 0:
             OS.kill(pid)
+        if pipe != null:
+            pipe.close()
         _thread.wait_to_finish()
 
 
@@ -98,6 +104,10 @@ func _process(delta: float) -> void:
 
     _mutex.lock()
     _enabled = Settings.discord_enabled
+    # свой Application ID из настроек (если задан) — под ним Discord покажет имя
+    # твоего приложения; пустое поле = встроенный ID по умолчанию
+    var app_id: String = Settings.discord_app_id.strip_edges()
+    _client_id = app_id if app_id != "" else APP_ID
     _pending = {
         "cmd": "SET_ACTIVITY",
         "args": {
@@ -125,6 +135,7 @@ func _worker() -> void:
         _mutex.lock()
         var quit := _quit
         var enabled := _enabled
+        var client_id := _client_id
         var pending := _pending.duplicate(true)
         _mutex.unlock()
 
@@ -146,8 +157,11 @@ func _worker() -> void:
             retry_at = now + 15000
             pipe = _open_ipc()
             if pipe != null:
-                if _frame(pipe, 0, {"v": 1, "client_id": APP_ID}) and _read_frame(pipe):
+                if _frame(pipe, 0, {"v": 1, "client_id": client_id}) and _read_frame(pipe):
                     sent = ""
+                    _mutex.lock()
+                    _pipe_ref = pipe
+                    _mutex.unlock()
                 else:
                     _close_ipc(pipe)
                     pipe = null
@@ -188,12 +202,13 @@ func _open_ipc() -> FileAccess:
 
 
 func _close_ipc(pipe: FileAccess) -> void:
-    if pipe != null:
-        pipe.close()
     _mutex.lock()
+    _pipe_ref = null
     var pid := _bridge_pid
     _bridge_pid = -1
     _mutex.unlock()
+    if pipe != null:
+        pipe.close()
     if pid > 0:
         OS.kill(pid)
 

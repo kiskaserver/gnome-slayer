@@ -742,7 +742,9 @@ static func _poi_bounty_board(parent: Node3D, rng: RandomNumberGenerator, pos: V
 	glow.position = Vector3(pos.x, 1.75, pos.z)
 	parent.add_child(glow)
 
-	_static_cylinder(parent, pos.x, pos.z, 0.6, 2.0)
+	# коллизия и резерв места под точку совпадают (было 0.6 против 0.9) —
+	# столб доски перекрывает свою же зону, без «сквозного» края
+	_static_cylinder(parent, pos.x, pos.z, 0.9, 2.0)
 	obstacles.append({"x": pos.x, "z": pos.z, "r": 0.9})
 
 
