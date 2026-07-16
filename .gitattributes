@@ -18,4 +18,5 @@
 *.png   binary
 *.ico   binary
 *.wav   binary
+*.pdf   binary
 *.translation binary
