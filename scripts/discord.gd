@@ -5,7 +5,7 @@ extends Node
 ##             (Godot не открывает unix-сокеты; мост гоняет байты stdin<->сокет)
 ## Вся работа с каналом — в фоновом потоке (запись может блокироваться).
 
-const APP_ID := "1525892578287947947"
+const APP_ID := "1527332888960569344"
 const UPDATE_INTERVAL := 5.0
 const WORKER_TICK_MS := 300
 
