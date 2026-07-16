@@ -1,0 +1,25 @@
+# Godot 4 generated caches
+.godot/
+
+# Build artifacts (exported binaries are distributed via itch.io, not the repo)
+build/
+
+# Editor / local tooling
+tools/
+.vscode/
+.claude/
+
+# Logs and temp output
+*.log
+*.tmp
+
+# Release archives (too large for the repo; uploaded to itch.io)
+promo/*.zip
+promo/*.tar.gz
+
+# Unused leftover assets kept locally only
+adventurer_items/
+
+# OS junk
+Thumbs.db
+.DS_Store

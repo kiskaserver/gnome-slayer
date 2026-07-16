@@ -1,0 +1,21 @@
+# Normalize text files, keep game binaries intact
+* text=auto
+
+*.gd    text
+*.md    text
+*.cfg   text
+*.csv   text
+*.tscn  text
+*.godot text
+*.gdshader text
+*.import text
+*.uid   text
+
+# Binary assets — never touch line endings
+*.glb   binary
+*.gltf  binary
+*.bin   binary
+*.png   binary
+*.ico   binary
+*.wav   binary
+*.translation binary
