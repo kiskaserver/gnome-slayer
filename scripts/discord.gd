@@ -53,6 +53,10 @@ var _start_ts := 0
 var _bridge_pid := -1
 var _client_id := APP_ID       # активный Application ID (свой из настроек или встроенный)
 var _pipe_ref: FileAccess = null  # общая ссылка на канал — чтобы разблокировать чтение при выходе
+var _join_in := ""             # секрет присоединения, пришедший от Discord (воркер -> главный поток)
+
+## Кто-то нажал «Join» в Discord — прилетел секрет для подключения к хосту.
+signal join_requested(secret: String)
 
 
 func _ready() -> void:
@@ -84,6 +88,15 @@ func _exit_tree() -> void:
 func _process(delta: float) -> void:
     if _thread == null:
         return
+
+    # приглашение из Discord обрабатываем сразу (главный поток) — воркер положил секрет
+    _mutex.lock()
+    var join := _join_in
+    _join_in = ""
+    _mutex.unlock()
+    if join != "":
+        join_requested.emit(join)
+
     _update -= delta
     if _update > 0:
         return
@@ -92,6 +105,17 @@ func _process(delta: float) -> void:
     # строки собираем на главном потоке (tr/Net из воркера трогать нельзя)
     var details := tr("В главном меню")
     var state := ""
+    var activity := {
+        "details": details,
+        "state": state,
+        "timestamps": {"start": _start_ts},
+        "assets": {
+            "large_image": "cover",
+            "large_text": "Gnome Slayer — Shards of the Mountain Heart",
+            "small_image": "logo",
+            "small_text": "Gnome Slayer",
+        },
+    }
     if Net.game != null:
         match Net.game_mode:
             "story":
@@ -101,6 +125,15 @@ func _process(delta: float) -> void:
             _:
                 details = tr("Волны — волна %d") % maxi(Net.game.wave, 1)
         state = tr("В отряде: %d") % Net.players.size() if Net.players.size() > 1 else tr("В одиночку")
+        activity["details"] = details
+        activity["state"] = state
+        # хост-сессия: показываем пати и (если не приватная) секрет присоединения —
+        # тогда у друзей в Discord появляется кнопка «Join»
+        if Net.mode == Net.Mode.HOST:
+            activity["party"] = {"id": Net.party_id, "size": [Net.players.size(), Net.MAX_PARTY]}
+            activity["instance"] = true
+            if not Net.session_private and Net.players.size() < Net.MAX_PARTY:
+                activity["secrets"] = {"join": Net.build_join_secret()}
 
     _mutex.lock()
     _enabled = Settings.discord_enabled
@@ -110,14 +143,7 @@ func _process(delta: float) -> void:
     _client_id = app_id if app_id != "" else APP_ID
     _pending = {
         "cmd": "SET_ACTIVITY",
-        "args": {
-            "pid": OS.get_process_id(),
-            "activity": {
-                "details": details,
-                "state": state,
-                "timestamps": {"start": _start_ts},
-            },
-        },
+        "args": {"pid": OS.get_process_id(), "activity": activity},
         "nonce": str(Time.get_ticks_msec()),
     }
     _mutex.unlock()
@@ -128,6 +154,7 @@ func _worker() -> void:
     var pipe: FileAccess = null
     var sent := ""
     var retry_at := 0
+    var last_beat := 0  # для heartbeat-обновления (чтобы регулярно читать канал)
 
     while true:
         OS.delay_msec(WORKER_TICK_MS)
@@ -156,21 +183,30 @@ func _worker() -> void:
                 continue
             retry_at = now + 15000
             pipe = _open_ipc()
-            if pipe != null:
-                if _frame(pipe, 0, {"v": 1, "client_id": client_id}) and _read_frame(pipe):
-                    sent = ""
-                    _mutex.lock()
-                    _pipe_ref = pipe
-                    _mutex.unlock()
-                else:
+            if pipe != null and _frame(pipe, 0, {"v": 1, "client_id": client_id}) and _pump(pipe):
+                _mutex.lock()
+                _pipe_ref = pipe
+                _mutex.unlock()
+                # подписываемся на приглашения — только тогда прилетают ACTIVITY_JOIN
+                _frame(pipe, 1, {"cmd": "SUBSCRIBE", "evt": "ACTIVITY_JOIN", "nonce": str(now)})
+                _pump(pipe)
+                _frame(pipe, 1, {"cmd": "SUBSCRIBE", "evt": "ACTIVITY_JOIN_REQUEST", "nonce": str(now + 1)})
+                _pump(pipe)
+                sent = ""
+                last_beat = now
+            else:
+                if pipe != null:
                     _close_ipc(pipe)
-                    pipe = null
+                pipe = null
             if pipe == null:
                 continue
 
+        # шлём при изменении или как heartbeat раз в 3 c: регулярное чтение канала
+        # нужно, чтобы вовремя поймать событие ACTIVITY_JOIN (нажатие «Join» в Discord)
         var key := JSON.stringify(pending.args)
-        if key != sent:
-            if _frame(pipe, 1, pending) and _read_frame(pipe):
+        if key != sent or now - last_beat >= 3000:
+            last_beat = now
+            if _frame(pipe, 1, pending) and _pump(pipe):
                 sent = key
             else:
                 _close_ipc(pipe)
@@ -226,15 +262,38 @@ func _frame(pipe: FileAccess, op: int, payload: Dictionary) -> bool:
     return pipe.get_error() == OK
 
 
-func _read_frame(pipe: FileAccess) -> bool:
+## Читает один кадр из канала и обрабатывает событие, если это приглашение.
+## Возвращает false только при ошибке чтения (канал закрылся) — тогда воркер
+## переоткроет его. Обычные ответы на команды просто проглатываются.
+func _pump(pipe: FileAccess) -> bool:
     var header := pipe.get_buffer(8)
     if header.size() < 8 or pipe.get_error() != OK:
         return false
-
     var length := header.decode_u32(4)
-    if length > 0 and length < 65536:
-        var body := pipe.get_buffer(length)
-        if body.size() < length or pipe.get_error() != OK:
-            return false
-
+    if length == 0:
+        return true
+    if length >= 65536:
+        return false
+    var body := pipe.get_buffer(length)
+    if body.size() < length or pipe.get_error() != OK:
+        return false
+    var msg = JSON.parse_string(body.get_string_from_utf8())
+    if typeof(msg) != TYPE_DICTIONARY:
+        return true
+    var evt = msg.get("evt", null)
+    var data = msg.get("data", {})
+    if typeof(data) != TYPE_DICTIONARY:
+        return true
+    if evt == "ACTIVITY_JOIN" and data.has("secret"):
+        # игрок нажал «Join» — передаём секрет главному потоку для подключения
+        _mutex.lock()
+        _join_in = str(data["secret"])
+        _mutex.unlock()
+    elif evt == "ACTIVITY_JOIN_REQUEST":
+        # «Ask to Join» — сессия открытая (host выбрал не приватную), принимаем
+        var user = data.get("user", {})
+        var uid = str(user.get("id", "")) if typeof(user) == TYPE_DICTIONARY else ""
+        if uid != "":
+            _frame(pipe, 1, {"cmd": "SEND_ACTIVITY_JOIN_INVITE",
+                "args": {"user_id": uid}, "nonce": str(Time.get_ticks_msec())})
     return true

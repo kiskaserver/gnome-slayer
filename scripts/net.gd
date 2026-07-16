@@ -15,6 +15,12 @@ var difficulty := "normal" # easy | normal | hard
 var continue_campaign := false # «Продолжить» в меню
 var sides_mask := 0            # выполненные сайды кампании (битовая маска, сервер)
 
+# --- параметры хост-сессии (для приглашений через Discord) ---
+const MAX_PARTY := 8
+var host_port := DEFAULT_PORT   # порт, на котором поднят сервер
+var session_private := false    # приватная сессия: без кнопки «Join» в Discord
+var party_id := ""              # идентификатор пати для Discord Rich Presence
+
 
 ## Новая запись игрока: базовые счётчики + герой из сохранения.
 func _fresh_player(pname: String) -> Dictionary:
@@ -74,15 +80,18 @@ func start_single(mode_name: String = "pve") -> void:
 	players = {1: _fresh_player(my_name)}
 
 
-func start_host(port: int, mode_name: String) -> Error:
+func start_host(port: int, mode_name: String, private := false) -> Error:
 	var peer := ENetMultiplayerPeer.new()
-	var err := peer.create_server(port, 8)
+	var err := peer.create_server(port, MAX_PARTY)
 	if err != OK:
 		return err
 	peer.host.compress(ENetConnection.COMPRESS_RANGE_CODER)
 	multiplayer.multiplayer_peer = peer
 	mode = Mode.HOST
 	game_mode = mode_name
+	host_port = port
+	session_private = private
+	party_id = "gs-%d-%d" % [randi(), randi()] # уникальна на сессию, для Discord-пати
 	world_seed = randi()
 	campaign_chapter = Save.chapter if (game_mode == "story" and continue_campaign) else 1
 	sides_mask = Save.sides_mask if (game_mode == "story" and continue_campaign) else 0
@@ -101,6 +110,35 @@ func start_client(ip: String, port: int) -> Error:
 	mode = Mode.CLIENT
 	players = {}
 	return OK
+
+
+## Все локальные IPv4-адреса хоста (LAN/VPN), кроме петлевого — их и передаём
+## в секрете приглашения, чтобы присоединяющийся перебрал их по очереди.
+func local_ipv4() -> Array:
+	var out: Array = []
+	for a in IP.get_local_addresses():
+		if a.count(".") == 3 and not a.begins_with("127.") and not a.begins_with("169.254."):
+			if not out.has(a):
+				out.append(a)
+	return out
+
+
+## Секрет присоединения для Discord: base64(JSON) с адресами хоста и портом.
+## Discord доставляет эту строку тому, кто нажал «Join», игра сама подключается.
+func build_join_secret() -> String:
+	var payload := {"ips": local_ipv4(), "port": host_port, "v": 1}
+	return Marshalls.utf8_to_base64(JSON.stringify(payload))
+
+
+## Разбор секрета из Discord: {ips:[...], port:int} или {} при ошибке.
+func parse_join_secret(secret: String) -> Dictionary:
+	var raw := Marshalls.base64_to_utf8(secret)
+	if raw == "":
+		return {}
+	var data = JSON.parse_string(raw)
+	if typeof(data) != TYPE_DICTIONARY or not data.has("ips") or not data.has("port"):
+		return {}
+	return data
 
 
 func shutdown(reason: String = "") -> void:

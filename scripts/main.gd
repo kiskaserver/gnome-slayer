@@ -54,6 +54,7 @@ func _ready() -> void:
 	Net.session_failed.connect(_on_session_failed)
 	Net.session_ended.connect(_on_session_ended)
 	Achievements.unlocked.connect(_on_achievement_unlocked)
+	Discord.join_requested.connect(_on_discord_join)
 	Music.play_track("menu")
 
 	_handle_cmdline()
@@ -665,6 +666,14 @@ func _build_mp_section(content: Control) -> Control:
 	mode_opt.custom_minimum_size = Vector2(240, 40)
 	mode_opt.fit_to_longest_item = false
 	hm.add_child(mode_opt)
+	# тип сессии для приглашений через Discord
+	var hs := _row(hbox, tr("Сессия:"), 90)
+	var sess_opt := OptionButton.new()
+	sess_opt.add_item(tr("Открытая — друзья могут зайти из Discord"), 0)
+	sess_opt.add_item(tr("Приватная — только по прямому IP"), 1)
+	sess_opt.custom_minimum_size = Vector2(240, 40)
+	sess_opt.fit_to_longest_item = false
+	hs.add_child(sess_opt)
 	_difficulty_row(hbox, 90)
 	var hp_row := _row(hbox, tr("Порт:"), 90)
 	var hport_edit := LineEdit.new()
@@ -695,7 +704,7 @@ func _build_mp_section(content: Control) -> Control:
 			return
 		var mode_name: String = ["story", "pve", "pvp"][mode_opt.selected]
 		Net.continue_campaign = Save.has_campaign()
-		var err := Net.start_host(port, mode_name)
+		var err := Net.start_host(port, mode_name, sess_opt.selected == 1)
 		if err != OK:
 			_set_status(tr("Не удалось открыть порт %d (занят?).") % port)
 			return
@@ -1017,6 +1026,7 @@ func _set_status(text: String) -> void:
 func enter_game() -> void:
 	if game != null:
 		return
+	_joining = false # успешно вошли — прекращаем перебор адресов Discord-приглашения
 	menu_root.visible = false
 	_set_status("")
 	game = Game.new()
@@ -1085,7 +1095,55 @@ func leave_game() -> void:
 
 
 func _on_session_failed(reason: String) -> void:
+	# идёт присоединение по приглашению Discord — не показываем ошибку,
+	# а пробуем следующий адрес хоста из списка
+	if _joining:
+		_join_next()
+		return
 	_set_status(reason)
+
+
+# --- присоединение по приглашению Discord ---
+var _join_ips: Array = []
+var _join_port := 0
+var _joining := false
+var _join_gen := 0
+
+
+## Игрок нажал «Join» в Discord: секрет содержит адреса и порт хоста.
+func _on_discord_join(secret: String) -> void:
+	if game != null or Net.mode != Net.Mode.NONE:
+		return # уже в игре или подключаемся
+	var info := Net.parse_join_secret(secret)
+	_join_ips = info.get("ips", [])
+	_join_port = int(info.get("port", Net.DEFAULT_PORT))
+	if _join_ips.is_empty():
+		_set_status(tr("Не удалось разобрать приглашение Discord."))
+		return
+	if menu_root != null:
+		menu_root.visible = true
+	_joining = true
+	_join_next()
+
+
+## Пробует очередной адрес хоста; провалы прокидываются через _on_session_failed.
+func _join_next() -> void:
+	if _join_ips.is_empty():
+		_joining = false
+		_set_status(tr("Не удалось подключиться к хосту из Discord (нужен VPN или проброс порта)."))
+		return
+	var ip: String = str(_join_ips.pop_front())
+	_join_gen += 1
+	var gen := _join_gen
+	_set_status(tr("Discord: подключение к %s...") % ip)
+	if Net.start_client(ip, _join_port) != OK:
+		_join_next()
+		return
+	# страховочный таймаут: если ни успех (enter_game), ни явный отказ за 6 c
+	await get_tree().create_timer(6.0).timeout
+	if _joining and gen == _join_gen and game == null:
+		Net.shutdown()
+		_join_next()
 
 
 func _on_session_ended(reason: String) -> void:
