@@ -33,6 +33,8 @@ func _fresh_player(pname: String) -> Dictionary:
 	for k in Save.hero.keys():
 		p[k] = Save.hero[k]
 	p["skills"] = Save.hero_skills.duplicate()
+	p["inventory"] = Save.hero_inventory.duplicate(true)
+	p["equipment"] = Save.hero_equipment.duplicate(true)
 	return p
 var biome: String = "meadow"
 var biome_choice: String = "random"
@@ -235,11 +237,13 @@ func rpc_session_info(gmode: String, wseed: int, wbiome: String, server_version:
 	zone_seed = zseed
 	if main != null:
 		main.enter_game()
-	rpc_id(1, "rpc_register", my_name, GAME_VERSION, Save.hero, Save.hero_skills)
+	rpc_id(1, "rpc_register", my_name, GAME_VERSION, Save.hero, Save.hero_skills,
+		Save.hero_inventory, Save.hero_equipment)
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func rpc_register(pname: String, version: String, hero: Dictionary = {}, skills: Dictionary = {}) -> void:
+func rpc_register(pname: String, version: String, hero: Dictionary = {}, skills: Dictionary = {},
+		inv: Array = [], equipment: Dictionary = {}) -> void:
 	if not is_server:
 		return
 	var id := multiplayer.get_remote_sender_id()
@@ -261,6 +265,16 @@ func rpc_register(pname: String, version: String, hero: Dictionary = {}, skills:
 		if Skills.TREE.has(sid) and skills[sid] == true:
 			entry_skills[sid] = true
 	entry["skills"] = entry_skills
+	# инвентарь/экипировка: каждая позиция через санитайзер (id по базе, клампы) —
+	# аффиксы всё равно выводятся из (id, rarity, aseed), подделать статы нельзя
+	var entry_inv: Array = []
+	for raw in inv:
+		var it := Items.sanitize(raw)
+		if not it.is_empty() and entry_inv.size() < 20:
+			entry_inv.append(it)
+	entry["inventory"] = entry_inv
+	entry["equipment"] = {"weapon": Items.sanitize(equipment.get("weapon", {})),
+		"trinket": Items.sanitize(equipment.get("trinket", {}))}
 	players[id] = entry
 	if game != null:
 		game.server_on_player_joined(id)
@@ -573,6 +587,76 @@ func req_shrine(idx: int) -> void:
 			game.server_shrine_bless(my_id, idx)
 	else:
 		rpc_id(1, "rpc_req_shrine", idx)
+
+
+# --- инвентарь и экипировка ---
+@rpc("authority", "call_remote", "reliable")
+func rpc_inv_sync(inv: Array, equipment: Dictionary) -> void:
+	if game != null:
+		game.on_inv_sync(inv, equipment)
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_item_drop(did: int, item: Dictionary, x: float, z: float) -> void:
+	if game != null:
+		game.on_item_drop(did, item, x, z)
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_item_drop_taken(did: int, taker: int) -> void:
+	if game != null:
+		game.on_item_drop_taken(did, taker)
+
+
+## Реплика оружия: все клиенты видят, чем машет игрок.
+@rpc("authority", "call_local", "reliable")
+func rpc_player_equip(id: int, weapon_id: String) -> void:
+	if game != null:
+		var node = game.player_nodes.get(id)
+		if node != null:
+			node.set_weapon_visual(weapon_id)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_req_equip(inv_idx: int) -> void:
+	if game != null and is_server:
+		game.server_equip_item(multiplayer.get_remote_sender_id(), inv_idx)
+
+
+func req_equip(inv_idx: int) -> void:
+	if is_server:
+		if game != null:
+			game.server_equip_item(my_id, inv_idx)
+	else:
+		rpc_id(1, "rpc_req_equip", inv_idx)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_req_unequip(slot: String) -> void:
+	if game != null and is_server:
+		game.server_unequip(multiplayer.get_remote_sender_id(), slot)
+
+
+func req_unequip(slot: String) -> void:
+	if is_server:
+		if game != null:
+			game.server_unequip(my_id, slot)
+	else:
+		rpc_id(1, "rpc_req_unequip", slot)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_req_drop_item(inv_idx: int) -> void:
+	if game != null and is_server:
+		game.server_drop_item(multiplayer.get_remote_sender_id(), inv_idx)
+
+
+func req_drop_item(inv_idx: int) -> void:
+	if is_server:
+		if game != null:
+			game.server_drop_item(my_id, inv_idx)
+	else:
+		rpc_id(1, "rpc_req_drop_item", inv_idx)
 
 
 ## Общая точка входа для новых интерактивных поинтов (костёр/колодец/доска

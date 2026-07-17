@@ -22,6 +22,8 @@ const OLD_PATH := "user://save.cfg"
 var active_slot := 1
 var hero := {"xp": 0, "level": 1, "points": 0, "str": 0, "vit": 0, "agi": 0, "luck": 0}
 var hero_skills: Dictionary = {}  # id -> true; отдельно от hero — там только int-поля
+var hero_inventory: Array = []    # предметы Items-формата (id/kind/rarity/aseed/count)
+var hero_equipment: Dictionary = {"weapon": {}, "trinket": {}}
 var chapter := 1
 var sides_mask := 0
 
@@ -85,6 +87,8 @@ func delete_slot(i: int) -> void:
 func load_slot(i: int) -> void:
 	hero = {"xp": 0, "level": 1, "points": 0, "str": 0, "vit": 0, "agi": 0, "luck": 0}
 	hero_skills = {}
+	hero_inventory = []
+	hero_equipment = {"weapon": {}, "trinket": {}}
 	chapter = 1
 	sides_mask = 0
 	var cfg := ConfigFile.new()
@@ -95,6 +99,17 @@ func load_slot(i: int) -> void:
 	var raw_skills = cfg.get_value("hero", "skills", {})
 	if raw_skills is Dictionary:
 		hero_skills = raw_skills
+	# инвентарь/экипировка: каждая позиция через санитайзер — битый сейв не роняет игру
+	var raw_inv = cfg.get_value("hero", "inventory", [])
+	if raw_inv is Array:
+		for raw in raw_inv:
+			var it := Items.sanitize(raw)
+			if not it.is_empty():
+				hero_inventory.append(it)
+	var raw_eq = cfg.get_value("hero", "equipment", {})
+	if raw_eq is Dictionary:
+		hero_equipment = {"weapon": Items.sanitize(raw_eq.get("weapon", {})),
+			"trinket": Items.sanitize(raw_eq.get("trinket", {}))}
 	chapter = clampi(int(cfg.get_value("campaign", "chapter", 1)), 1, Quests.CHAPTERS.size())
 	sides_mask = int(cfg.get_value("campaign", "sides_mask", 0))
 
@@ -104,6 +119,8 @@ func write() -> void:
 	for k in hero.keys():
 		cfg.set_value("hero", k, hero[k])
 	cfg.set_value("hero", "skills", hero_skills)
+	cfg.set_value("hero", "inventory", hero_inventory)
+	cfg.set_value("hero", "equipment", hero_equipment)
 	cfg.set_value("campaign", "chapter", chapter)
 	cfg.set_value("campaign", "sides_mask", sides_mask)
 	cfg.set_value("meta", "saved_at", Time.get_datetime_string_from_system(false, true))
@@ -111,13 +128,17 @@ func write() -> void:
 	slots_changed.emit()
 
 
-## Забирает характеристики героя (и открытые навыки) из сетевой записи игрока.
+## Забирает характеристики героя (навыки, инвентарь, экипировку) из сетевой записи.
 func store_hero(p: Dictionary) -> void:
 	for k in hero.keys():
 		if p.has(k):
 			hero[k] = p[k]
 	if p.get("skills", {}) is Dictionary:
 		hero_skills = p.get("skills", {})
+	if p.get("inventory", null) is Array:
+		hero_inventory = p.get("inventory").duplicate(true)
+	if p.get("equipment", null) is Dictionary:
+		hero_equipment = p.get("equipment").duplicate(true)
 	write()
 
 

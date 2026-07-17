@@ -77,6 +77,7 @@ const REBIND_ACTIONS := [
 	["move_forward", "Вперёд"], ["move_back", "Назад"], ["move_left", "Влево"], ["move_right", "Вправо"],
 	["run", "Бег"], ["dodge", "Кувырок"], ["attack", "Атака"], ["block", "Блок"],
 	["interact", "Поднять друга"], ["voice", "Рация (голос)"], ["chat", "Чат"], ["stats", "Персонаж"],
+	["inventory", "Инвентарь"],
 ]
 
 var _rebind_action := ""
@@ -94,6 +95,7 @@ func _setup_input() -> void:
 	_add_key("voice", KEY_V)
 	_add_key("chat", KEY_T)
 	_add_key("stats", KEY_C)
+	_add_key("inventory", KEY_I)
 	_add_mouse("attack", MOUSE_BUTTON_LEFT)
 	_add_mouse("block", MOUSE_BUTTON_RIGHT)
 	Settings.apply_keybinds()
@@ -162,6 +164,10 @@ func _input(event: InputEvent) -> void:
 			game.hud.toggle_stats({})
 			game.ui_blocked = false
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		elif game != null and game.hud.is_inventory_open():
+			game.hud.toggle_inventory([], {})
+			game.ui_blocked = false
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		elif game != null and game.hud.is_chat_open():
 			game.hud.close_chat()
 		elif settings_root != null:
@@ -182,6 +188,16 @@ func _input(event: InputEvent) -> void:
 		var opened: bool = game.hud.toggle_stats(Net.players.get(Net.my_id, {}))
 		game.ui_blocked = opened
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if opened else Input.MOUSE_MODE_CAPTURED
+		get_viewport().set_input_as_handled()
+		return
+
+	# инвентарь (I)
+	if pause_root == null and gameover_root == null and settings_root == null \
+			and event.is_action_pressed("inventory") and not game.hud.is_chat_open() \
+			and not game.hud.is_stats_open():
+		var iopened: bool = game.hud.toggle_inventory(game.inventory, game.my_equip)
+		game.ui_blocked = iopened
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if iopened else Input.MOUSE_MODE_CAPTURED
 		get_viewport().set_input_as_handled()
 		return
 
@@ -1045,6 +1061,9 @@ func enter_game() -> void:
 			game.dialog_closed(adv))
 	game.hud.stat_alloc.connect(func(stat: String): Net.req_stat(stat))
 	game.hud.skill_unlock.connect(func(skill_id: String): Net.req_skill(skill_id))
+	game.hud.inv_equip.connect(func(idx: int): Net.req_equip(idx))
+	game.hud.inv_unequip.connect(func(slot: String): Net.req_unequip(slot))
+	game.hud.inv_drop.connect(func(idx: int): Net.req_drop_item(idx))
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	Music.play_track(Net.biome)
 
@@ -1075,6 +1094,9 @@ func goto_chapter() -> void:
 			game.dialog_closed(adv))
 	game.hud.stat_alloc.connect(func(stat: String): Net.req_stat(stat))
 	game.hud.skill_unlock.connect(func(skill_id: String): Net.req_skill(skill_id))
+	game.hud.inv_equip.connect(func(idx: int): Net.req_equip(idx))
+	game.hud.inv_unequip.connect(func(slot: String): Net.req_unequip(slot))
+	game.hud.inv_drop.connect(func(idx: int): Net.req_drop_item(idx))
 	Music.play_track(Net.biome)
 	game.hud.banner(tr("Глава %d") % Net.campaign_chapter, 3.0)
 
@@ -1559,7 +1581,7 @@ func _process(delta: float) -> void:
 				hp_text += "P%d(hp=%d,st=%s) " % [id, game.server_hp.get(id, -1) if Net.is_server else game.player_nodes[id].hp, game.player_nodes[id].state]
 			var inv_text := ""
 			for slot in game.inventory:
-				inv_text += "%s x%d " % [slot.type, slot.count]
+				inv_text += "%s x%d " % [slot.get("id", slot.get("type", "?")), slot.get("count", 1)]
 			print("[TEST] t=%.0f %s wave=%d biome=%s pickups=%d chests=%d inv=[%s] nav=%s gnomes=[%s]" % [
 				_test_timer, hp_text, game.wave, Net.biome, game.pickups.size(), game.chests.size(), inv_text.strip_edges(), game.nav_ready, ", ".join(parts)])
 		else:
@@ -1763,6 +1785,40 @@ func _process(delta: float) -> void:
 				print("[TEST] story: elite gnome spawn FAIL (not found)")
 			print("[TEST] achievements: unlocked=%d lore=%d/%d" % [
 				Achievements.count_unlocked(), Achievements.lore_progress().x, Achievements.lore_progress().y])
+
+			# --- экипировка: выдать, надеть, проверить статы и персист ---
+			var dmg_cap_before: int = game._max_melee_dmg(1)
+			var hp_before2: int = game.player_max_hp(1)
+			game._server_grant_equipment(1, {"id": "axe2h", "kind": "weapon", "rarity": 2, "aseed": 12345, "count": 1})
+			game._server_grant_equipment(1, {"id": "amulet_oak", "kind": "trinket", "rarity": 1, "aseed": 777, "count": 1})
+			var inv1: Array = game.server_inv[1]
+			game.server_equip_item(1, inv1.size() - 2) # секира
+			inv1 = game.server_inv[1]
+			game.server_equip_item(1, inv1.size() - 1) # амулет (сместился на конец)
+			var eqd: Dictionary = game.server_equip[1]
+			var dmg_cap_after: int = game._max_melee_dmg(1)
+			var hp_after2: int = game.player_max_hp(1)
+			print("[TEST] items: equip weapon=%s trinket=%s PASS=%s" % [
+				eqd.weapon.get("id", "?"), eqd.trinket.get("id", "?"),
+				str(eqd.weapon.get("id", "") == "axe2h" and eqd.trinket.get("id", "") == "amulet_oak")])
+			# кап урона растёт, только если среди аффиксов выпал «Урон» (детерминировано от сида);
+			# +hp гарантирован — у амулета профильный аффикс всегда здоровье
+			var afw := Items.affixes({"id": "axe2h", "rarity": 2, "aseed": 12345})
+			var cap_ok: bool = (dmg_cap_after > dmg_cap_before) == afw.has("dmg")
+			print("[TEST] items: dmg cap %d->%d (dmg affix=%s) hp %d->%d PASS=%s" % [
+				dmg_cap_before, dmg_cap_after, str(afw.has("dmg")), hp_before2, hp_after2,
+				str(cap_ok and hp_after2 > hp_before2)])
+			# детерминизм аффиксов: одинаковая тройка -> одинаковые статы
+			var af1 := Items.affixes({"id": "axe2h", "rarity": 2, "aseed": 12345})
+			var af2 := Items.affixes({"id": "axe2h", "rarity": 2, "aseed": 12345})
+			var af3 := Items.affixes({"id": "axe2h", "rarity": 2, "aseed": 54321})
+			print("[TEST] items: affix determinism PASS=%s (diff seed differs=%s)" % [
+				str(af1 == af2), str(af1 != af3)])
+			# персист: инвентарь/экипировка уезжают в сейв героя
+			Save.store_hero(Net.players[1])
+			print("[TEST] items: save inv=%d equip_w=%s PASS=%s" % [
+				Save.hero_inventory.size(), Save.hero_equipment.weapon.get("id", "?"),
+				str(Save.hero_equipment.weapon.get("id", "") == "axe2h")])
 			get_tree().quit()
 
 	# тест паузы: в одиночке мир должен замирать
@@ -1797,7 +1853,7 @@ func _process(delta: float) -> void:
 	if _test_mode == "single" and _test_chest and not _test_item_used and _test_timer > 16.0 and game != null:
 		_test_item_used = true
 		if game.inventory.size() > 0:
-			var itype: String = game.inventory[0].type
+			var itype: String = game.inventory[0].get("id", "?")
 			game.use_item_slot(0)
 			print("[TEST] used item: %s, inv slots left=%d" % [itype, game.inventory.size()])
 		else:

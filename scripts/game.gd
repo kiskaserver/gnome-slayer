@@ -99,13 +99,19 @@ var fireballs: Dictionary = {}    # fid -> {node, dir, life}
 var chests: Dictionary = {}       # cid -> {node, lid, opened, x, z}
 var bombs: Dictionary = {}        # bid -> {node, vel, life}
 
-# инвентарь локального игрока: массив {type, count} (макс. HOTBAR_SIZE слотов)
+# инвентарь локального игрока: синхронизированная копия серверного
+# (массив предметов Items-формата: {id, kind, rarity, aseed, count})
 var inventory: Array = []
+var my_equip: Dictionary = {"weapon": {}, "trinket": {}}  # своя экипировка (синк)
+const INV_SIZE := 20
+var item_drops: Dictionary = {}  # did -> {node, item, life}: экипировка на земле
+var drop_seq := 0
 
 # --- серверное состояние ---
 var server_hp: Dictionary = {}
 var server_shield: Dictionary = {}
-var server_inv: Dictionary = {}  # id -> Array{type,count}: авторитетное зеркало инвентарей
+var server_inv: Dictionary = {}    # id -> Array предметов: авторитетный инвентарь
+var server_equip: Dictionary = {}  # id -> {"weapon": item|{}, "trinket": item|{}}
 var players_meta: Dictionary = {}
 var attackers: Dictionary = {}
 var max_attackers := 2
@@ -213,6 +219,8 @@ func _ready() -> void:
 		for w in ["Skeleton_Blade", "Skeleton_Axe", "Skeleton_Staff", "Skeleton_Shield_Small_A"]:
 			_model_cache[w] = load("res://models/skeleton_weapons/%s.gltf" % w)
 		_model_cache["sword_2handed"] = load("res://models/adventurer_items/sword_2handed.gltf")
+		for w2 in ["axe_1handed", "axe_2handed", "dagger", "sword_1handed", "crossbow_1handed", "staff", "wand"]:
+			_model_cache[w2] = load("res://models/adventurer_items/%s.gltf" % w2)
 	models = _model_cache
 
 	# сюжет живёт в большом мире-путешествии (или в подземелье), волны/ПвП — на арене
@@ -309,9 +317,25 @@ func weapon_scene(weapon_name: String) -> PackedScene:
 func server_on_player_joined(id: int) -> void:
 	var color: Color = PLAYER_COLORS[players_meta.size() % PLAYER_COLORS.size()]
 	var pos := _player_spawn_pos()
+	# инвентарь/экипировка героя приезжают с ним (из сейва через регистрацию),
+	# каждая позиция прогоняется через санитайзер — мусор и подделки отсеиваются
+	var pd: Dictionary = Net.players.get(id, {})
+	var inv: Array = []
+	for raw in pd.get("inventory", []):
+		var it := Items.sanitize(raw)
+		if not it.is_empty() and inv.size() < INV_SIZE:
+			inv.append(it)
+	server_inv[id] = inv
+	var eq_raw: Dictionary = pd.get("equipment", {})
+	server_equip[id] = {"weapon": Items.sanitize(eq_raw.get("weapon", {})),
+		"trinket": Items.sanitize(eq_raw.get("trinket", {}))}
 	server_hp[id] = player_max_hp(id)
 	players_meta[id] = {"color": color}
 	var pname: String = Net.players[id].name
+	_sync_inv(id)
+	var weq: Dictionary = server_equip[id].weapon
+	if not weq.is_empty():
+		Net.bcast("rpc_player_equip", [id, weq.id])
 
 	if id != 1:
 		# новому клиенту — текущее состояние мира
@@ -387,6 +411,7 @@ func on_despawn_player(id: int) -> void:
 	server_hp.erase(id)
 	server_shield.erase(id)
 	server_inv.erase(id)
+	server_equip.erase(id)
 	players_meta.erase(id)
 	respawn_timers.erase(id)
 	revive_progress.erase(id)
@@ -433,8 +458,9 @@ func find_downed_near(pos: Vector3, radius: float, exclude_id: int) -> int:
 ## Считаем по сильнейшему шагу серии с учётом всех множителей и запасом.
 func _max_melee_dmg(id: int) -> int:
 	var pd: Dictionary = Net.players.get(id, {})
-	# 36 — самый мощный удар (2H_Melee_Attack_Chop), 1.5 — ярость, 1.8 — крит
-	var top := 36.0 * 1.5 * Quests.dmg_mult_for(pd) * 1.8 * Quests.crit_dmg_mult_for(pd)
+	# 42 — самый мощный удар (секира), 1.5 — ярость, 1.8 — крит, аффиксы экипировки
+	var top := 42.0 * 1.5 * Quests.dmg_mult_for(pd) * 1.8 * Quests.crit_dmg_mult_for(pd) \
+		* Items.equip_dmg_mult(server_equip.get(id, {}))
 	return int(ceil(top)) + 4  # небольшой запас на округления
 
 
@@ -811,6 +837,15 @@ func server_gnome_died(g, from_pos: Vector3, crit: bool, finisher := false) -> v
 		Net.bcast("rpc_gold", [server_gold])
 		_story_on_gnome_died(g)
 	if not is_pvp():
+		# экипировка: боссы роняют гарантированно, элитки — часто, обычные — редко
+		var killer_luck: int = Net.players.get(killer, {}).get("luck", 0)
+		var is_boss: bool = g.gid == boss_gid or g.cfg.has("special")
+		if is_boss or g.elite or randf() < 0.06:
+			var drop := Items.roll_drop(g.level, killer_luck, randi(), is_boss or g.elite)
+			if not drop.is_empty():
+				if is_boss and drop.rarity < 1:
+					drop.rarity = 1 # босс не роняет серость
+				server_spawn_item_drop(drop, g.global_position.x, g.global_position.z)
 		var roll := randf()
 		if g.type == "king":
 			pass # король ничего не роняет — он и есть награда
@@ -2229,7 +2264,7 @@ func on_qnode_lit(id: int) -> void:
 # Опыт и уровни
 # ---------------------------------------------------------------------------
 func player_max_hp(id: int) -> int:
-	return Quests.max_hp_for(Net.players.get(id, {}))
+	return Quests.max_hp_for(Net.players.get(id, {})) + Items.equip_hp_bonus(server_equip.get(id, {}))
 
 
 func server_grant_xp_all(amount: int) -> void:
@@ -2512,6 +2547,11 @@ func server_open_chest(opener: int, cid: int) -> void:
 	if is_story():
 		server_gold += randi_range(8, 14)
 		Net.bcast("rpc_gold", [server_gold])
+	# шанс экипировки: одна вещь падает НА ЗЕМЛЮ у сундука — кто первый поднял
+	if randf() < 0.3:
+		var edrop := Items.roll_drop(enemy_level(), Net.players.get(opener, {}).get("luck", 0), randi(), true)
+		if not edrop.is_empty():
+			server_spawn_item_drop(edrop, c.x + randf_range(-1.0, 1.0), c.z + randf_range(-1.0, 1.0))
 	# лут: 2-3 предмета, В КООПЕРАТИВЕ ПОЛУЧАЮТ ВСЕ ИГРОКИ
 	var total := 0
 	for e in CHEST_LOOT:
@@ -2541,36 +2581,211 @@ func server_open_chest(opener: int, cid: int) -> void:
 				_server_grant_item(id, type)
 
 
-## Выдать предмет игроку (сервер): ведём авторитетное зеркало инвентаря и лишь
-## затем рассылаем — чтобы применение предмета можно было проверить на сервере,
-## а не верить клиенту на слово (иначе — бесконечные бомбы/пиры модифицированным
-## клиентом). Логика набивки/лимита слотов совпадает с клиентской (on_item_granted).
+## Выдать расходник игроку (сервер): авторитетный инвентарь + синк владельцу.
+## Расходники стакаются по id; экипировка (оружие/тринкеты) идёт отдельными
+## слотами через _server_grant_equipment.
 func _server_grant_item(id: int, type: String) -> void:
 	var inv: Array = server_inv.get(id, [])
 	var stacked := false
 	for slot in inv:
-		if slot.type == type:
+		if slot.get("kind", "") == "consumable" and slot.id == type:
 			slot.count += 1
 			stacked = true
 			break
 	if not stacked:
-		if inv.size() >= HOTBAR_SIZE:
-			return # инвентарь полон — предмет теряется, как и на клиенте
-		inv.append({"type": type, "count": 1})
+		if inv.size() >= INV_SIZE:
+			Net.send_sys(id, "Инвентарь полон! %s пропал." % tr(ITEM_DEFS.get(type, {}).get("title", type)))
+			return
+		inv.append({"id": type, "kind": "consumable", "rarity": 0, "aseed": 0, "count": 1})
 	server_inv[id] = inv
 	Net.bcast("rpc_item_granted", [id, type])
+	_sync_inv(id)
 
 
-## Списать один предмет из серверного инвентаря; false — если его там нет.
+## Выдать экипировку (сервер). false — инвентарь полон.
+func _server_grant_equipment(id: int, item: Dictionary) -> bool:
+	var inv: Array = server_inv.get(id, [])
+	if inv.size() >= INV_SIZE:
+		return false
+	inv.append(item)
+	server_inv[id] = inv
+	_sync_inv(id)
+	return true
+
+
+## Списать один расходник по id; false — если его нет.
 func _server_consume_item(id: int, type: String) -> bool:
 	var inv: Array = server_inv.get(id, [])
 	for i in inv.size():
-		if inv[i].type == type:
+		if inv[i].get("kind", "") == "consumable" and inv[i].id == type:
 			inv[i].count -= 1
 			if inv[i].count <= 0:
 				inv.remove_at(i)
+			_sync_inv(id)
 			return true
 	return false
+
+
+## Синк авторитетного инвентаря/экипировки владельцу (и в Net.players — для сейва).
+func _sync_inv(id: int) -> void:
+	var inv: Array = server_inv.get(id, [])
+	var eq: Dictionary = server_equip.get(id, {"weapon": {}, "trinket": {}})
+	if Net.players.has(id):
+		Net.players[id]["inventory"] = inv.duplicate(true)
+		Net.players[id]["equipment"] = eq.duplicate(true)
+	if id == Net.my_id:
+		on_inv_sync(inv, eq)
+	else:
+		Net.rpc_id(id, "rpc_inv_sync", inv, eq)
+
+
+## Клиент получил свой инвентарь/экипировку от сервера.
+func on_inv_sync(inv: Array, eq: Dictionary) -> void:
+	inventory = inv
+	my_equip = eq
+	if Net.players.has(Net.my_id):
+		Net.players[Net.my_id]["inventory"] = inv.duplicate(true)
+		Net.players[Net.my_id]["equipment"] = eq.duplicate(true)
+	hud.set_inventory(_consumables())
+	if hud.is_inventory_open():
+		hud.refresh_inventory(inventory, my_equip)
+	var me = player_nodes.get(Net.my_id)
+	if me != null:
+		me.on_equip_changed(my_equip)
+
+
+## Расходники в порядке инвентаря — это и есть хотбар (клавиши 1-5).
+func _consumables() -> Array:
+	var out: Array = []
+	for it in inventory:
+		if it.get("kind", "") == "consumable":
+			out.append({"type": it.id, "count": it.count})
+	return out.slice(0, HOTBAR_SIZE)
+
+
+## Надеть предмет из инвентаря (сервер): слот по виду предмета, снятое — назад.
+func server_equip_item(id: int, inv_idx: int) -> void:
+	var inv: Array = server_inv.get(id, [])
+	if inv_idx < 0 or inv_idx >= inv.size():
+		return
+	var item: Dictionary = inv[inv_idx]
+	var slot := ""
+	match item.get("kind", ""):
+		"weapon": slot = "weapon"
+		"trinket": slot = "trinket"
+		_: return
+	var eq: Dictionary = server_equip.get(id, {"weapon": {}, "trinket": {}})
+	inv.remove_at(inv_idx)
+	var prev: Dictionary = eq.get(slot, {})
+	if not prev.is_empty():
+		inv.append(prev)
+	eq[slot] = item
+	server_inv[id] = inv
+	server_equip[id] = eq
+	_sync_inv(id)
+	_bcast_player_hp(id) # макс. здоровье могло измениться от аффиксов
+	if slot == "weapon":
+		Net.bcast("rpc_player_equip", [id, item.id])
+
+
+## Снять предмет (сервер): слот -> инвентарь.
+func server_unequip(id: int, slot: String) -> void:
+	if not slot in ["weapon", "trinket"]:
+		return
+	var eq: Dictionary = server_equip.get(id, {"weapon": {}, "trinket": {}})
+	var item: Dictionary = eq.get(slot, {})
+	if item.is_empty():
+		return
+	var inv: Array = server_inv.get(id, [])
+	if inv.size() >= INV_SIZE:
+		Net.send_sys(id, "Инвентарь полон — снять некуда.")
+		return
+	inv.append(item)
+	eq[slot] = {}
+	server_inv[id] = inv
+	server_equip[id] = eq
+	_sync_inv(id)
+	_bcast_player_hp(id)
+	if slot == "weapon":
+		Net.bcast("rpc_player_equip", [id, "sword1h"])
+
+
+## Выбросить предмет из инвентаря (сервер) — просто исчезает (M4: продажа).
+func server_drop_item(id: int, inv_idx: int) -> void:
+	var inv: Array = server_inv.get(id, [])
+	if inv_idx < 0 or inv_idx >= inv.size():
+		return
+	inv.remove_at(inv_idx)
+	server_inv[id] = inv
+	_sync_inv(id)
+
+
+func _bcast_player_hp(id: int) -> void:
+	if server_hp.has(id):
+		server_hp[id] = mini(server_hp[id], player_max_hp(id))
+		var node = player_nodes.get(id)
+		var pos: Vector3 = node.global_position if node != null else Vector3.ZERO
+		Net.bcast("rpc_player_hp", [id, server_hp[id], player_max_hp(id), "sync", pos.x, pos.z])
+
+
+## Дроп экипировки на землю (сервер): лежит, ждёт, кто первым подберёт.
+func server_spawn_item_drop(item: Dictionary, x: float, z: float) -> void:
+	if item.is_empty():
+		return
+	drop_seq += 1
+	Net.bcast("rpc_item_drop", [drop_seq, item, x, z])
+
+
+func on_item_drop(did: int, item: Dictionary, x: float, z: float) -> void:
+	if item_drops.has(did):
+		return
+	var rarity: int = clampi(int(item.get("rarity", 0)), 0, 3)
+	var node := WorldGen.crystal(self, Items.RARITY_COLORS[rarity])
+	node.global_position = Vector3(x, 0, z)
+	node.scale = Vector3.ONE * 1.15
+	var lbl := Label3D.new()
+	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lbl.text = tr(Items.def_name(item))
+	lbl.modulate = Items.RARITY_COLORS[rarity]
+	lbl.outline_size = 7
+	lbl.pixel_size = 0.006
+	lbl.position.y = 1.15
+	node.add_child(lbl)
+	item_drops[did] = {"node": node, "item": item, "life": 0.0}
+
+
+func on_item_drop_taken(did: int, taker: int) -> void:
+	var d: Dictionary = item_drops.get(did, {})
+	if d.is_empty():
+		return
+	if is_instance_valid(d.node):
+		fx_burst(d.node.global_position + Vector3(0, 0.6, 0), Items.RARITY_COLORS[clampi(int(d.item.get("rarity", 0)), 0, 3)], 14)
+		d.node.queue_free()
+	item_drops.erase(did)
+	if taker == Net.my_id:
+		Sfx.play("pickup")
+		hud.add_chat("", tr("+ %s (%s)") % [tr(Items.def_name(d.item)), tr(Items.RARITY_NAMES[clampi(int(d.item.get("rarity", 0)), 0, 3)])], true)
+
+
+func _update_item_drops(delta: float) -> void:
+	for did in item_drops.keys():
+		var d: Dictionary = item_drops[did]
+		d.life += delta
+		if is_instance_valid(d.node):
+			d.node.rotation.y += delta * 1.5
+		if not Net.is_server:
+			continue
+		if d.life < 0.8:
+			continue
+		for id in player_nodes:
+			if server_hp.get(id, 0) <= 0:
+				continue
+			if d.node.global_position.distance_to(player_nodes[id].global_position) < 1.6:
+				if _server_grant_equipment(id, d.item):
+					Net.bcast("rpc_item_drop_taken", [did, id])
+				break
+		if d.life > 60.0 and item_drops.has(did):
+			Net.bcast("rpc_item_drop_taken", [did, 0])
 
 
 func on_chest_opened(cid: int) -> void:
@@ -2619,39 +2834,26 @@ func on_chest_opened(cid: int) -> void:
 # ---------------------------------------------------------------------------
 # Инвентарь (хотбар локального игрока)
 # ---------------------------------------------------------------------------
+## Уведомление о полученном расходнике (звук + строка в ленту).
+## Само содержимое инвентаря приходит отдельным авторитетным синком (rpc_inv_sync).
 func on_item_granted(id: int, type: String) -> void:
 	var node = player_nodes.get(id)
 	if node != null:
 		Sfx.play_at("pickup", node.global_position)
 	if id != Net.my_id:
 		return
-	var title: String = tr(ITEM_DEFS.get(type, {}).get("title", type))
-	for slot in inventory:
-		if slot.type == type:
-			slot.count += 1
-			hud.set_inventory(inventory)
-			hud.add_chat("", tr("+ %s") % title, true)
-			return
-	if inventory.size() < HOTBAR_SIZE:
-		inventory.append({"type": type, "count": 1})
-		hud.set_inventory(inventory)
-		hud.add_chat("", tr("+ %s (клавиша %d)") % [title, inventory.size()], true)
-	else:
-		hud.add_chat("", tr("Инвентарь полон! %s пропал.") % title, true)
+	hud.add_chat("", tr("+ %s") % tr(ITEM_DEFS.get(type, {}).get("title", type)), true)
 
 
+## Клавиши 1-5: используем idx-й расходник хотбара (списание — на сервере).
 func use_item_slot(idx: int) -> void:
-	if idx < 0 or idx >= inventory.size():
+	var bar := _consumables()
+	if idx < 0 or idx >= bar.size():
 		return
 	var me = player_nodes.get(Net.my_id)
 	if me == null or me.state in ["dead", "downed"]:
 		return
-	var slot: Dictionary = inventory[idx]
-	var type: String = slot.type
-	slot.count -= 1
-	if slot.count <= 0:
-		inventory.remove_at(idx)
-	hud.set_inventory(inventory)
+	var type: String = bar[idx].type
 	var dir := Vector3(sin(me.facing), 0, cos(me.facing))
 	Net.req_use_item(type, dir.x, dir.z)
 	if type == "bomb":
@@ -2843,6 +3045,7 @@ func _physics_process(delta: float) -> void:
 	_update_fireballs(delta)
 	_update_bombs(delta)
 	_update_pickups(delta)
+	_update_item_drops(delta)
 	# автосейв героя раз в 30 секунд
 	_hero_save_timer -= delta
 	if _hero_save_timer <= 0:

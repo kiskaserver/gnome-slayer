@@ -142,26 +142,66 @@ func _prepare_model(color: Color) -> void:
 					mesh_inst.set_surface_override_material(i, m2)
 
 
-## Показывает нужное оружие: 1H меч + щит или великий меч.
+var weapon_id := "sword1h"       # класс оружия в руках (реплицируется)
+var _attached_weapon: Node3D = null
+
+
+## Показывает нужное оружие: запечённые меши Knight для мечей/щита,
+## рантайм-модель из пака Adventurers для топоров/кинжала. Кристалл
+## «великий меч» временно переключает на sword2h.
 func _update_weapon() -> void:
-	var two_handed := has_buff("greatsword")
+	var wid := "sword2h" if has_buff("greatsword") else weapon_id
+	var cls: Dictionary = Items.WEAPONS.get(wid, Items.WEAPONS["sword1h"])
+	var baked: String = cls.baked
+	var want_shield: bool = cls.shield
 	for mesh_inst in model.find_children("*", "MeshInstance3D", true, false):
 		var n := String(mesh_inst.name)
 		if n.contains("2H_Sword"):
-			mesh_inst.visible = two_handed
+			mesh_inst.visible = baked == "2H_Sword"
 		elif n.contains("1H_Sword") and not n.contains("Offhand"):
-			mesh_inst.visible = not two_handed
+			mesh_inst.visible = baked == "1H_Sword"
 		elif n.contains("Round_Shield"):
-			mesh_inst.visible = not two_handed
+			mesh_inst.visible = want_shield
 		else:
 			for p in HIDE_1H:
 				if n.contains(p):
 					mesh_inst.visible = false
 					break
+	# рантайм-модель в правую руку (топор/кинжал)
+	if _attached_weapon != null:
+		_attached_weapon.queue_free()
+		_attached_weapon = null
+	if cls.model != "":
+		var slot := model.find_children("handslot.r", "", true, false)
+		if not slot.is_empty():
+			var wnode: Node3D = game.weapon_scene(cls.model).instantiate()
+			slot[0].add_child(wnode)
+			_attached_weapon = wnode
+			for mi in wnode.find_children("*", "MeshInstance3D", true, false):
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+
+## Реплика: чем машет этот игрок (для всех клиентов).
+func set_weapon_visual(wid: String) -> void:
+	if not Items.WEAPONS.has(wid):
+		wid = "sword1h"
+	weapon_id = wid
+	combo_step = 0
+	_update_weapon()
+
+
+## Локально: сервер подтвердил новую экипировку.
+func on_equip_changed(eq: Dictionary) -> void:
+	var w: Dictionary = eq.get("weapon", {})
+	set_weapon_visual(w.get("id", "sword1h"))
 
 
 func active_combo() -> Array:
-	return COMBO_2H if has_buff("greatsword") else COMBO_1H
+	if has_buff("greatsword"):
+		return Items.WEAPONS["sword2h"].combo
+	if is_local:
+		return Items.combo_for(game.my_equip)
+	return Items.WEAPONS.get(weapon_id, Items.WEAPONS["sword1h"]).combo
 
 
 func has_buff(type: String) -> bool:
@@ -370,8 +410,9 @@ func _deal_damage(step: Dictionary) -> void:
 	if targets.is_empty():
 		return
 	var me: Dictionary = Net.players.get(Net.my_id, {})
-	var crit := randf() < Quests.crit_chance_for(me)
-	var dmg_f: float = step.dmg * (1.5 if has_buff("rage") else 1.0) * Quests.dmg_mult_for(me)
+	var crit := randf() < Quests.crit_chance_for(me) + Items.equip_crit_bonus(game.my_equip)
+	var dmg_f: float = step.dmg * (1.5 if has_buff("rage") else 1.0) * Quests.dmg_mult_for(me) \
+		* Items.equip_dmg_mult(game.my_equip)
 	var dmg: int = roundi(dmg_f * (1.8 * Quests.crit_dmg_mult_for(me) if crit else 1.0))
 	Net.req_melee(targets, dmg, crit)
 	Sfx.play_at("hit", global_position)
@@ -667,7 +708,8 @@ func _local_sim(delta: float) -> void:
 	if state != "dodge":
 		if moving and speed_mul > 0:
 			var buff_speed := 1.35 if has_buff("speed") else 1.0
-			var stat_speed: float = Quests.speed_mult_for(Net.players.get(Net.my_id, {})) if is_local else 1.0
+			var stat_speed: float = Quests.speed_mult_for(Net.players.get(Net.my_id, {})) \
+				* Items.equip_speed_mult(game.my_equip) if is_local else 1.0
 			var speed := (RUN_SPEED if running else WALK_SPEED) * speed_mul * buff_speed * stat_speed
 			velocity.x = _move_dir.x * speed
 			velocity.z = _move_dir.z * speed
