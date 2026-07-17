@@ -2,7 +2,7 @@
 
 A co-op 3D action game built with **Godot 4.7**: you are a knight facing hordes of surprisingly well-organized gnomes. Single-player and full multiplayer — PvE co-op and PvP — with **Windows ↔ Linux crossplay**, positional voice chat, and a 6-chapter story campaign with three endings.
 
-**Current version: 3.1.0** · [Play on itch.io](https://itch.io) (search "Gnome Slayer") · Assets: CC0 by [Kay Lousberg](https://kaylousberg.com)
+**Current version: 4.0.0** · [Play on itch.io](https://itch.io) (search "Gnome Slayer") · Assets: CC0 by [Kay Lousberg](https://kaylousberg.com)
 
 ![Meadow](promo/shot_meadow.png)
 
@@ -27,7 +27,7 @@ A co-op 3D action game built with **Godot 4.7**: you are a knight facing hordes 
 
 | Mode | Description |
 |---|---|
-| **Story — Shards of the Mountain Heart** | 6 chapters, camp NPCs, side quests, 3 endings that depend on your choices. Solo or co-op. |
+| **Story — Shards of the Mountain Heart** | 6 chapters as a real journey: a large multi-area overworld with a road, gates, settlements and a crypt dungeon at the far end; camp NPCs, side quests, a merchant, 3 endings. Solo or co-op. |
 | **Waves (PvE)** | Survive 7 growing waves of enemies, alone or with friends. |
 | **PvP** | Arena duel with ruins — first to 10 kills. Gnomes interfere with everyone. |
 
@@ -39,7 +39,11 @@ A co-op 3D action game built with **Godot 4.7**: you are a knight facing hordes 
 - **Cinematic cutscenes** between chapters: letterboxed multi-shot camera work, subtitle timing that scales with line length, HUD fully hidden.
 - **Day/night cycle** — a full day in 8 minutes with sunrises, golden sunsets, a starry sky and a cratered moon; house windows light up at dusk; time is synchronized between players.
 - **4 biomes** with unique enemy rosters: meadow, winter forest, autumn forest, night graveyard.
-- **8 kinds of interactive points of interest**, 4 random ones per map (see below).
+- **Journey overworld** (story): a 120-radius multi-area world — camp, settlement, battlefield, grove and the dungeon approach — connected by a path-tile road with fence gates; campfires serve as respawn checkpoints; enemies are leashed to their home areas.
+- **Procedural crypt dungeons**: rooms + corridors from the Dungeon Remastered kit, torch-lit, with spike traps, loot rooms and a boss hall; the whole party descends together and portals back after claiming the shard.
+- **Full inventory & equipment** (I key): 20-slot grid, weapon + trinket slots, 5 weapon classes with distinct combos (sword&shield, axe&shield, dagger, two-handed sword, battle axe), 4 rarity tiers with deterministic affixes — forged saves can't fake stats.
+- **Merchant at camp**: seed-rolled stock per chapter, buy gear/potions, sell loot for squad gold.
+- **8 kinds of interactive points of interest**, spread across overworld areas.
 - **19 achievements**, from first blood to collecting all of a map's lore.
 - **24 lore fragments** scattered across ruins, standing stones, crypts and battlefields.
 - **Hero persistence** — 3 save slots; in multiplayer every player brings their own knight from their own slot.
@@ -63,6 +67,7 @@ All bindings are remappable in Settings.
 | V (hold) | Voice chat |
 | T | Text chat |
 | C | Character sheet (stats & skill tree) |
+| I | Inventory & equipment |
 | 1–5 | Hotbar items |
 | Esc | Pause / menu |
 

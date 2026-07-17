@@ -123,6 +123,7 @@ func write() -> void:
 	cfg.set_value("hero", "equipment", hero_equipment)
 	cfg.set_value("campaign", "chapter", chapter)
 	cfg.set_value("campaign", "sides_mask", sides_mask)
+	cfg.set_value("meta", "save_ver", 2) # 2 = добавлены инвентарь/экипировка (4.0)
 	cfg.set_value("meta", "saved_at", Time.get_datetime_string_from_system(false, true))
 	cfg.save(slot_path(active_slot))
 	slots_changed.emit()

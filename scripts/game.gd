@@ -1423,6 +1423,7 @@ var portal_node: Node3D = null
 # найм вольных магов (сюжет): вербовщик в лагере, оплата — золото отряда
 const HIRE_COST := 30
 const HIRE_NPC := {"model": "Mage", "name": "Вольный маг Фырк", "tint": Color(0.72, 1.0, 0.78)}
+const MERCHANT_NPC := {"model": "Rogue", "name": "Торговец Крамс", "tint": Color(1.0, 0.9, 0.6)}
 
 
 ## Сейф-зона лагеря (только сюжет): враги сюда не заходят и урон не проходит.
@@ -1473,7 +1474,11 @@ func _build_camp() -> void:
 	var npc_hire := Npc.new()
 	add_child(npc_hire)
 	npc_hire.setup(self, HIRE_NPC, CAMP_POS + Vector3(2.8, 0, -0.6), CAMP_POS + Vector3(0, 0, 4))
-	npcs = [npc_main, npc_side, npc_hire]
+	# торговец: скупает трофеи и продаёт снаряжение (ассортимент — на главу)
+	var npc_shop := Npc.new()
+	add_child(npc_shop)
+	npc_shop.setup(self, MERCHANT_NPC, CAMP_POS + Vector3(-2.8, 0, -0.4), CAMP_POS + Vector3(0, 0, 4))
+	npcs = [npc_main, npc_side, npc_hire, npc_shop]
 	_update_npc_markers()
 
 
@@ -1788,6 +1793,10 @@ func start_dialog(npc_idx: int) -> void:
 	elif npc_idx == 2:
 		dialog_key = "hire_offer"
 		advance = "hire"
+	elif npc_idx == 3:
+		# торговец: сразу лавка, без диалога
+		open_shop()
+		return
 	else:
 		if q_side == 2:
 			dialog_key = cfg.side_talk + "_done"
@@ -1806,6 +1815,68 @@ func dialog_closed(advance: String) -> void:
 	ui_blocked = false
 	if advance != "":
 		Net.req_talk(advance)
+
+
+# ---------------------------------------------------------------------------
+# Лавка торговца
+# ---------------------------------------------------------------------------
+func open_shop() -> void:
+	ui_blocked = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	hud.open_shop(Items.shop_stock(Net.world_seed, Net.campaign_chapter), inventory, gold)
+
+
+func close_shop() -> void:
+	ui_blocked = false
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	hud.close_shop()
+
+
+## Покупка (сервер): позиция ассортимента пересчитывается тем же сидом —
+## клиент не может подсунуть свой товар или цену.
+func server_buy(sender: int, stock_idx: int) -> void:
+	if not is_story() or match_over:
+		return
+	var stock := Items.shop_stock(Net.world_seed, Net.campaign_chapter)
+	if stock_idx < 0 or stock_idx >= stock.size():
+		return
+	var entry: Dictionary = stock[stock_idx]
+	if server_gold < entry.price:
+		Net.send_sys(sender, "Не хватает золота.")
+		return
+	var item: Dictionary = entry.item.duplicate(true)
+	var ok: bool
+	if item.kind == "consumable":
+		_server_grant_item(sender, item.id)
+		ok = true
+	else:
+		ok = _server_grant_equipment(sender, item)
+	if not ok:
+		Net.send_sys(sender, "Инвентарь полон.")
+		return
+	server_gold -= entry.price
+	Net.bcast("rpc_gold", [server_gold])
+	Net.send_sys(sender, "Куплено: %s" % tr(Items.def_name(item)))
+
+
+## Продажа (сервер): предмет из инвентаря — в золото отряда.
+func server_sell(sender: int, inv_idx: int) -> void:
+	if not is_story() or match_over:
+		return
+	var inv: Array = server_inv.get(sender, [])
+	if inv_idx < 0 or inv_idx >= inv.size():
+		return
+	var item: Dictionary = inv[inv_idx]
+	var price := Items.sell_price(item)
+	if int(item.get("count", 1)) > 1:
+		item.count -= 1
+	else:
+		inv.remove_at(inv_idx)
+	server_inv[sender] = inv
+	_sync_inv(sender)
+	server_gold += price
+	Net.bcast("rpc_gold", [server_gold])
+	Net.send_sys(sender, "Продано: %s (+%d з.)" % [tr(Items.def_name(item)), price])
 
 
 # --- серверная логика квестов ---
@@ -1961,6 +2032,8 @@ func on_gold(total: int) -> void:
 	gold = total
 	if total >= 500:
 		Achievements.unlock("wealthy")
+	if hud.is_shop_open():
+		hud.refresh_shop(inventory, gold)
 	_update_quest_hud()
 
 
@@ -2649,6 +2722,8 @@ func on_inv_sync(inv: Array, eq: Dictionary) -> void:
 	hud.set_inventory(_consumables())
 	if hud.is_inventory_open():
 		hud.refresh_inventory(inventory, my_equip)
+	if hud.is_shop_open():
+		hud.refresh_shop(inventory, gold)
 	var me = player_nodes.get(Net.my_id)
 	if me != null:
 		me.on_equip_changed(my_equip)

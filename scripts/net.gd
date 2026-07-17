@@ -6,7 +6,7 @@ extends Node
 enum Mode { NONE, SINGLE, HOST, CLIENT }
 
 const DEFAULT_PORT := 7777
-const GAME_VERSION := "3.0.2" # у хоста и клиента должна совпадать
+const GAME_VERSION := "4.0" # у хоста и клиента должна совпадать
 
 var mode: int = Mode.NONE
 var game_mode: String = "pve" # pve | pvp | story
@@ -643,6 +643,34 @@ func req_unequip(slot: String) -> void:
 			game.server_unequip(my_id, slot)
 	else:
 		rpc_id(1, "rpc_req_unequip", slot)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_req_buy(stock_idx: int) -> void:
+	if game != null and is_server:
+		game.server_buy(multiplayer.get_remote_sender_id(), stock_idx)
+
+
+func req_buy(stock_idx: int) -> void:
+	if is_server:
+		if game != null:
+			game.server_buy(my_id, stock_idx)
+	else:
+		rpc_id(1, "rpc_req_buy", stock_idx)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_req_sell(inv_idx: int) -> void:
+	if game != null and is_server:
+		game.server_sell(multiplayer.get_remote_sender_id(), inv_idx)
+
+
+func req_sell(inv_idx: int) -> void:
+	if is_server:
+		if game != null:
+			game.server_sell(my_id, inv_idx)
+	else:
+		rpc_id(1, "rpc_req_sell", inv_idx)
 
 
 @rpc("any_peer", "call_remote", "reliable")

@@ -681,6 +681,8 @@ func _local_sim(delta: float) -> void:
 			game.hud.set_hint(tr("Держи [%s] — поднять %s") % [key, dname])
 		elif npc_i == 2:
 			game.hud.set_hint(tr("[%s] — нанять мага (%d золота)") % [key, Game.HIRE_COST])
+		elif npc_i == 3:
+			game.hud.set_hint(tr("[%s] — торговать") % key)
 		elif npc_i >= 0:
 			game.hud.set_hint(tr("[%s] — говорить") % key)
 		elif qn_id != 0:

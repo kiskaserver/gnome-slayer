@@ -176,6 +176,36 @@ static func roll_drop(level: int, luck: int, rng_seed: int, force := false) -> D
 		"rarity": rarity, "aseed": rng.randi(), "count": 1}
 
 
+# --- лавка торговца ---
+const CONSUMABLE_PRICES := {"potion_hp": 15, "bomb": 12, "potion_rage": 14, "potion_speed": 14}
+
+
+## Ассортимент лавки на главу: детерминирован (seed, chapter) — сервер и клиент
+## считают одинаково, по сети ассортимент гонять не нужно.
+## Позиция: {"item": Dictionary, "price": int}
+static func shop_stock(world_seed: int, chapter: int) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("shop:%d:%d" % [world_seed, chapter])
+	var stock: Array = []
+	for cid in CONSUMABLE_PRICES:
+		stock.append({"item": {"id": cid, "kind": "consumable", "rarity": 0, "aseed": 0, "count": 1},
+			"price": CONSUMABLE_PRICES[cid]})
+	for i in 3:
+		var it := roll_drop(chapter, 0, rng.randi(), true)
+		if it.is_empty():
+			continue
+		it.rarity = maxi(1, it.rarity) # торговец серостью не торгует
+		stock.append({"item": it, "price": 30 + it.rarity * 35 + chapter * 5})
+	return stock
+
+
+## Цена продажи торговцу: четверть закупочной за рарность, гроши за расходник.
+static func sell_price(item: Dictionary) -> int:
+	if item.get("kind", "") == "consumable":
+		return 3
+	return 10 + clampi(int(item.get("rarity", 0)), 0, 3) * 9
+
+
 ## Валидация предмета из сейва/от клиента: чужие id и мусор отбрасываются.
 static func sanitize(item) -> Dictionary:
 	if not (item is Dictionary):

@@ -1,5 +1,18 @@
-GNOMOBOY — Shards of the Mountain Heart (v3.1.0)
+GNOMOBOY — Shards of the Mountain Heart (v4.0)
 ======================================
+
+What's new in 4.0 — the Journey Update:
+  - The story is no longer arena-hopping: each chapter is a large multi-area
+    world — camp, settlement, battlefield, grove — linked by a real road with
+    gates, ending at a crypt dungeon where the shard guardian waits
+  - Procedural dungeons: torch-lit rooms and corridors, spike traps, loot
+    rooms, a banner-dressed boss hall; the party descends together and
+    portals back to the surface after taking the shard
+  - Full inventory and equipment (I key): 20 slots, weapon + trinket,
+    5 weapon classes with their own combos, 4 rarity tiers with random
+    affixes; gear drops from bosses/elites/chests and persists in your save
+  - Merchant at camp: buy gear and potions, sell your loot
+  - Campfires are now respawn checkpoints; enemies keep to their home areas
 
 What's new in 3.1:
   - Join from Discord: host an "Open" session and friends can jump in straight

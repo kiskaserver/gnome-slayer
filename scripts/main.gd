@@ -164,6 +164,8 @@ func _input(event: InputEvent) -> void:
 			game.hud.toggle_stats({})
 			game.ui_blocked = false
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		elif game != null and game.hud.is_shop_open():
+			game.close_shop()
 		elif game != null and game.hud.is_inventory_open():
 			game.hud.toggle_inventory([], {})
 			game.ui_blocked = false
@@ -1064,6 +1066,8 @@ func enter_game() -> void:
 	game.hud.inv_equip.connect(func(idx: int): Net.req_equip(idx))
 	game.hud.inv_unequip.connect(func(slot: String): Net.req_unequip(slot))
 	game.hud.inv_drop.connect(func(idx: int): Net.req_drop_item(idx))
+	game.hud.shop_buy.connect(func(idx: int): Net.req_buy(idx))
+	game.hud.shop_sell.connect(func(idx: int): Net.req_sell(idx))
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	Music.play_track(Net.biome)
 
@@ -1097,6 +1101,8 @@ func goto_chapter() -> void:
 	game.hud.inv_equip.connect(func(idx: int): Net.req_equip(idx))
 	game.hud.inv_unequip.connect(func(slot: String): Net.req_unequip(slot))
 	game.hud.inv_drop.connect(func(idx: int): Net.req_drop_item(idx))
+	game.hud.shop_buy.connect(func(idx: int): Net.req_buy(idx))
+	game.hud.shop_sell.connect(func(idx: int): Net.req_sell(idx))
 	Music.play_track(Net.biome)
 	game.hud.banner(tr("Глава %d") % Net.campaign_chapter, 3.0)
 
@@ -1819,6 +1825,20 @@ func _process(delta: float) -> void:
 			print("[TEST] items: save inv=%d equip_w=%s PASS=%s" % [
 				Save.hero_inventory.size(), Save.hero_equipment.weapon.get("id", "?"),
 				str(Save.hero_equipment.weapon.get("id", "") == "axe2h")])
+
+			# --- лавка: детерминизм ассортимента, покупка, продажа ---
+			var stock1 := Items.shop_stock(Net.world_seed, Net.campaign_chapter)
+			var stock2 := Items.shop_stock(Net.world_seed, Net.campaign_chapter)
+			game.server_gold = 500
+			var inv_n_before: int = game.server_inv[1].size()
+			game.server_buy(1, 0) # первый расходник
+			var bought: bool = game.server_gold < 500
+			var gold_after_buy: int = game.server_gold
+			game.server_sell(1, game.server_inv[1].size() - 1)
+			print("[TEST] shop: stock=%d determ=%s buy(gold %d->%d inv %d->%d) sell(gold %d) PASS=%s" % [
+				stock1.size(), str(stock1 == stock2), 500, gold_after_buy,
+				inv_n_before, game.server_inv[1].size(), game.server_gold,
+				str(stock1.size() >= 5 and stock1 == stock2 and bought and game.server_gold > gold_after_buy)])
 			get_tree().quit()
 
 	# тест паузы: в одиночке мир должен замирать
