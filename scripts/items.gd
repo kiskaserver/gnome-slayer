@@ -49,7 +49,16 @@ const WEAPONS := {
 			{"anim": "2H_Melee_Attack_Slice", "dmg": 25, "range": 3.1, "arc": 1.7, "ts": 1.15},
 			{"anim": "2H_Melee_Attack_Chop", "dmg": 42, "range": 3.2, "arc": 1.6, "ts": 0.95},
 		]},
+	"crossbow": {
+		"name": "Арбалет", "model": "crossbow_1handed", "baked": "", "shield": true, "ranged": true,
+		"combo": [
+			{"anim": "1H_Ranged_Shoot", "dmg": 15, "range": 16.0, "arc": 0.3, "ts": 1.15},
+		]},
 }
+
+const RANGED_BASE_DMG := 15   # урон болта считает ТОЛЬКО сервер (клиент шлёт лишь направление)
+const RANGED_RANGE := 16.0
+const RANGED_COOLDOWN := 0.45 # серверный лимит скорострельности
 
 const TRINKETS := {
 	"ring_fang": {"name": "Кольцо клыка", "bias": "dmg"},

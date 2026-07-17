@@ -2795,6 +2795,81 @@ func server_drop_item(id: int, inv_idx: int) -> void:
 	_sync_inv(id)
 
 
+var _shot_cd: Dictionary = {}  # id -> время последнего выстрела (серверный лимит)
+
+
+## Выстрел арбалета (сервер): хитскан по направлению, урон считает сервер —
+## клиент присылает лишь куда смотрит. В ПвП стрелковое пока отключено.
+func server_shoot(sender: int, dx: float, dz: float) -> void:
+	if is_pvp() or match_over:
+		return
+	var sn = player_nodes.get(sender)
+	if sn == null or server_hp.get(sender, 0) <= 0:
+		return
+	var eq: Dictionary = server_equip.get(sender, {})
+	if not Items.WEAPONS.get(eq.get("weapon", {}).get("id", ""), {}).get("ranged", false):
+		return # в руках не стрелковое — читерский запрос
+	var now := Time.get_ticks_msec() / 1000.0
+	if now - float(_shot_cd.get(sender, 0.0)) < Items.RANGED_COOLDOWN:
+		return
+	_shot_cd[sender] = now
+	var dir := Vector2(dx, dz)
+	if dir.length_squared() < 0.01:
+		return
+	dir = dir.normalized()
+	var from := Vector2(sn.global_position.x, sn.global_position.z)
+	# ближайший враг в узком коридоре вдоль луча
+	var best_t := Items.RANGED_RANGE + 1.0
+	var hit = null
+	for g in gnomes.values():
+		if not g.alive or g.friendly:
+			continue
+		var rel := Vector2(g.global_position.x, g.global_position.z) - from
+		var t := rel.dot(dir)
+		if t < 0.5 or t > Items.RANGED_RANGE:
+			continue
+		if (rel - dir * t).length() > 0.9 and (rel - dir * t).length() > 0.35 * g.cfg.scale * 3.0:
+			continue
+		if t < best_t:
+			best_t = t
+			hit = g
+	var pd: Dictionary = Net.players.get(sender, {})
+	var crit := randf() < Quests.crit_chance_for(pd) + Items.equip_crit_bonus(eq)
+	var dmg_f := Items.RANGED_BASE_DMG * Quests.dmg_mult_for(pd) * Items.equip_dmg_mult(eq)
+	var dmg := roundi(dmg_f * (1.8 * Quests.crit_dmg_mult_for(pd) if crit else 1.0))
+	var end_t: float = best_t if hit != null else Items.RANGED_RANGE
+	var to := from + dir * end_t
+	Net.bcast("rpc_bolt_fx", [from.x, from.y, to.x, to.y])
+	if hit != null:
+		hit.last_attacker = sender
+		hit.last_attacker_gid = 0
+		hit.server_take_damage(dmg, sn.global_position, crit)
+
+
+## Трассер болта: тонкая рейка от стрелка к цели, гаснет за мгновение.
+func on_bolt_fx(x1: float, z1: float, x2: float, z2: float) -> void:
+	var from := Vector3(x1, 1.2, z1)
+	var to := Vector3(x2, 1.1, z2)
+	var mesh := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.05, 0.05, from.distance_to(to))
+	mesh.mesh = bm
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.9, 0.8, 0.5)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.9, 0.6)
+	mesh.material_override = mat
+	add_child(mesh)
+	mesh.global_position = (from + to) * 0.5
+	if from.distance_squared_to(to) > 0.01:
+		mesh.look_at(to, Vector3.UP)
+	Sfx.play_at("fireball", from, -6.0, 1.7)
+	var t := create_tween()
+	t.tween_property(mesh, "scale", Vector3(0.2, 0.2, 1.0), 0.12)
+	t.tween_callback(mesh.queue_free)
+
+
 func _bcast_player_hp(id: int) -> void:
 	if server_hp.has(id):
 		server_hp[id] = mini(server_hp[id], player_max_hp(id))

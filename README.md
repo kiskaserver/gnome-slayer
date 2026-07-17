@@ -2,7 +2,7 @@
 
 A co-op 3D action game built with **Godot 4.7**: you are a knight facing hordes of surprisingly well-organized gnomes. Single-player and full multiplayer — PvE co-op and PvP — with **Windows ↔ Linux crossplay**, positional voice chat, and a 6-chapter story campaign with three endings.
 
-**Current version: 4.0.0** · [Play on itch.io](https://itch.io) (search "Gnome Slayer") · Assets: CC0 by [Kay Lousberg](https://kaylousberg.com)
+**Current version: 4.1.0** · [Play on itch.io](https://itch.io) (search "Gnome Slayer") · Assets: CC0 by [Kay Lousberg](https://kaylousberg.com)
 
 ![Meadow](promo/shot_meadow.png)
 
@@ -41,7 +41,7 @@ A co-op 3D action game built with **Godot 4.7**: you are a knight facing hordes 
 - **4 biomes** with unique enemy rosters: meadow, winter forest, autumn forest, night graveyard.
 - **Journey overworld** (story): a 120-radius multi-area world — camp, settlement, battlefield, grove and the dungeon approach — connected by a path-tile road with fence gates; campfires serve as respawn checkpoints; enemies are leashed to their home areas.
 - **Procedural crypt dungeons**: rooms + corridors from the Dungeon Remastered kit, torch-lit, with spike traps, loot rooms and a boss hall; the whole party descends together and portals back after claiming the shard.
-- **Full inventory & equipment** (I key): 20-slot grid, weapon + trinket slots, 5 weapon classes with distinct combos (sword&shield, axe&shield, dagger, two-handed sword, battle axe), 4 rarity tiers with deterministic affixes — forged saves can't fake stats.
+- **Full inventory & equipment** (I key): 20-slot grid, weapon + trinket slots, 6 weapon classes incl. a ranged crossbow (sword&shield, axe&shield, dagger, two-handed sword, battle axe, crossbow), 4 rarity tiers with deterministic affixes — forged saves can't fake stats.
 - **Merchant at camp**: seed-rolled stock per chapter, buy gear/potions, sell loot for squad gold.
 - **8 kinds of interactive points of interest**, spread across overworld areas.
 - **19 achievements**, from first blood to collecting all of a map's lore.

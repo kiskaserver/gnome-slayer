@@ -1839,6 +1839,35 @@ func _process(delta: float) -> void:
 				stock1.size(), str(stock1 == stock2), 500, gold_after_buy,
 				inv_n_before, game.server_inv[1].size(), game.server_gold,
 				str(stock1.size() >= 5 and stock1 == stock2 and bought and game.server_gold > gold_after_buy)])
+
+			# --- арбалет: экипировать, хитскан-выстрел по гному строго по лучу ---
+			game._server_grant_equipment(1, {"id": "crossbow", "kind": "weapon", "rarity": 0, "aseed": 1, "count": 1})
+			game.server_equip_item(1, game.server_inv[1].size() - 1)
+			var me6: PlayerChar = game.player_nodes.get(Net.my_id)
+			# чистое поле: убираем прочих врагов, ставим одну мишень строго на восток
+			for g6 in game.gnomes.values():
+				if g6.alive and not g6.friendly:
+					g6.alive = false
+					g6.hp = 0
+			me6.global_position = Vector3(0, 0.1, 0)
+			game.server_spawn_gnome_at("berserker", Vector3(6, 0, 0), 1)
+			var seq6: int = game.gnome_seq
+			await get_tree().process_frame
+			await get_tree().process_frame
+			var targ = game.gnomes.get(seq6)
+			if targ != null:
+				me6.global_position = Vector3(0, 0.1, 0)
+				targ.global_position = Vector3(6, 0.1, 0) # гарантируем позицию (не всплытие из норы)
+				targ.alive = true
+				var hp_t0: int = targ.hp
+				game._shot_cd.erase(1)
+				game.server_shoot(1, 1.0, 0.0) # луч ровно на восток
+				var shot_hit: bool = targ.hp < hp_t0 or not targ.alive
+				print("[TEST] crossbow: equipped=%s hitscan hp %d->%d PASS=%s" % [
+					str(game.server_equip[1].weapon.get("id", "") == "crossbow"),
+					hp_t0, targ.hp, str(shot_hit)])
+			else:
+				print("[TEST] crossbow: target spawn FAIL")
 			get_tree().quit()
 
 	# тест паузы: в одиночке мир должен замирать

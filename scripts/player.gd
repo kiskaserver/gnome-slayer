@@ -204,6 +204,16 @@ func active_combo() -> Array:
 	return Items.WEAPONS.get(weapon_id, Items.WEAPONS["sword1h"]).combo
 
 
+## Стрелковый ли класс сейчас в руках (великий меч-бафф перебивает).
+func is_ranged_weapon() -> bool:
+	if has_buff("greatsword"):
+		return false
+	var wid := weapon_id
+	if is_local:
+		wid = game.my_equip.get("weapon", {}).get("id", "sword1h")
+	return Items.WEAPONS.get(wid, {}).get("ranged", false)
+
+
 func has_buff(type: String) -> bool:
 	return buffs.get(type, 0.0) > 0.0
 
@@ -346,7 +356,10 @@ func _start_attack() -> void:
 	combo_queued = false
 	attack_dur = _play(step.anim, step.ts)
 	Sfx.play_at("swing", global_position)
-	_face_nearest_enemy()
+	if is_ranged_weapon():
+		facing = cam_yaw.rotation.y + PI # арбалет целится по камере, не по ближайшему врагу
+	else:
+		_face_nearest_enemy()
 
 
 func _face_nearest_enemy() -> void:
@@ -391,6 +404,13 @@ func try_dodge() -> void:
 
 
 func _deal_damage(step: Dictionary) -> void:
+	# арбалет: клиент шлёт только направление — урон и попадание решает сервер
+	if is_ranged_weapon():
+		facing = cam_yaw.rotation.y + PI # стреляем туда, куда смотрит камера
+		Net.req_shoot(sin(facing), cos(facing))
+		Sfx.play_at("swing", global_position, -2.0, 1.6)
+		add_shake(0.08)
+		return
 	var targets: Array = []
 	for id in game.gnomes:
 		var g = game.gnomes[id]

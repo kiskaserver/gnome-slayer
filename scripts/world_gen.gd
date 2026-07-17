@@ -68,7 +68,7 @@ static func prop_scene(path: String) -> PackedScene:
 	return _prop_cache[path]
 
 
-static func place_prop(parent: Node3D, path: String, pos: Vector3, rot_y: float, s: float, coll_r := 0.0, coll_h := 3.0) -> Node3D:
+static func place_prop(parent: Node3D, path: String, pos: Vector3, rot_y: float, s: float, coll_r := 0.0, coll_h := 3.0, vis_range := 0.0) -> Node3D:
 	var node: Node3D = prop_scene(path).instantiate()
 	parent.add_child(node)
 	node.global_position = pos
@@ -76,6 +76,9 @@ static func place_prop(parent: Node3D, path: String, pos: Vector3, rot_y: float,
 	node.scale = Vector3.ONE * s
 	for mi in node.find_children("*", "MeshInstance3D", true, false):
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		if vis_range > 0.0:
+			mi.visibility_range_end = vis_range
+			mi.visibility_range_end_margin = 8.0
 	if coll_r > 0.0:
 		_static_cylinder(parent, pos.x, pos.z, coll_r, coll_h)
 	return node
@@ -176,14 +179,14 @@ static func _static_cylinder(parent: Node, x: float, z: float, r: float, h: floa
 const DETAIL_VIS_RANGE := 95.0
 
 
-static func _tree(parent: Node, rng: RandomNumberGenerator, b: Dictionary, x: float, z: float, s: float, with_collision: bool) -> void:
+static func _tree(parent: Node, rng: RandomNumberGenerator, b: Dictionary, x: float, z: float, s: float, with_collision: bool, shadows := true) -> void:
 	# полноценные glb-деревья, если у биома они назначены
 	if b.has("tree_models"):
 		var prop := place_prop(parent, b.tree_models[rng.randi() % b.tree_models.size()],
-			Vector3(x, 0, z), rng.randf_range(0, TAU), s * 1.55)
-		for mi in prop.find_children("*", "MeshInstance3D", true, false):
-			mi.visibility_range_end = DETAIL_VIS_RANGE
-			mi.visibility_range_end_margin = 8.0
+			Vector3(x, 0, z), rng.randf_range(0, TAU), s * 1.55, 0.0, 3.0, DETAIL_VIS_RANGE)
+		if not shadows:
+			for mi in prop.find_children("*", "MeshInstance3D", true, false):
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if with_collision:
 			_static_cylinder(parent, x, z, 0.55 * s, 3.0)
 		return
@@ -201,7 +204,7 @@ static func _tree(parent: Node, rng: RandomNumberGenerator, b: Dictionary, x: fl
 	trunk.mesh = tm
 	trunk.material_override = _mat(Color(0.42, 0.29, 0.18))
 	trunk.position.y = 0.8 * s
-	trunk.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	trunk.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shadows else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	trunk.visibility_range_end = DETAIL_VIS_RANGE
 	trunk.visibility_range_end_margin = 8.0
 	g.add_child(trunk)
@@ -221,7 +224,7 @@ static func _tree(parent: Node, rng: RandomNumberGenerator, b: Dictionary, x: fl
 		cone.material_override = _mat(base_c.lightened(rng.randf_range(0.0, 0.08)))
 		cone.position.y = y + 0.85 * s
 		cone.rotation.y = rng.randf_range(0, TAU)
-		cone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		cone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shadows else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		cone.visibility_range_end = DETAIL_VIS_RANGE
 		cone.visibility_range_end_margin = 8.0
 		g.add_child(cone)
@@ -1069,7 +1072,7 @@ static func _setup_environment(parent: Node3D, b: Dictionary) -> Dictionary:
 	sun.light_energy = b.sun_e
 	sun.light_color = b.sun
 	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 90.0
+	sun.directional_shadow_max_distance = 70.0
 	parent.add_child(sun)
 
 	var moon := DirectionalLight3D.new()
@@ -1294,30 +1297,41 @@ static func _lay_road(parent: Node3D, rng: RandomNumberGenerator, pts: Array) ->
 	samples.append(pts[pts.size() - 1])
 	for i in samples.size():
 		var p: Vector3 = samples[i]
-		var tile := place_prop(parent, tiles[rng.randi() % tiles.size()], Vector3(p.x, 0.02, p.z), rng.randf_range(0, TAU), rng.randf_range(0.95, 1.15))
+		var tile := place_prop(parent, tiles[rng.randi() % tiles.size()], Vector3(p.x, 0.02, p.z),
+			rng.randf_range(0, TAU), rng.randf_range(0.95, 1.15), 0.0, 3.0, DETAIL_VIS_RANGE)
 		# дорога — плоский декор: тени и коллизия не нужны
 		for mi in tile.find_children("*", "MeshInstance3D", true, false):
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return samples
 
 
+## Поворот, при котором ЛОКАЛЬНАЯ ось X модели ложится вдоль мирового
+## направления (dx, dz). rotation.y = θ маппит X в (cos θ, -sin θ), поэтому
+## для направления (cos a, sin a) нужен θ = -a — иначе модели «ёлочкой».
+static func _yaw_along(dir_angle: float) -> float:
+	return -dir_angle
+
+
 ## Линия забора поперёк дороги с воротами arch_gate над самой дорогой.
 static func _fence_gate_line(parent: Node3D, rng: RandomNumberGenerator, gate_pos: Vector3, dir_angle: float, half_len: float, obstacles: Array) -> void:
 	var across := dir_angle + PI * 0.5
-	var gate := place_prop(parent, "halloween/arch_gate.gltf", gate_pos, across, 1.35)
+	var yaw := _yaw_along(across)
+	var gate := place_prop(parent, "halloween/arch_gate.gltf", gate_pos, yaw, 1.35)
 	for mi in gate.find_children("*", "MeshInstance3D", true, false):
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	# сами ворота — проходные (без коллизии), забор по бокам — с коллизией
+	# сами ворота — проходные (без коллизии), забор по бокам — с коллизией.
+	# Секции слегка внахлёст (шаг чуть меньше длины), чтобы линия была сплошной.
 	var fences := ["halloween/fence.gltf", "halloween/fence.gltf", "halloween/fence_broken.gltf"]
-	var seg := 4.0 * 1.1
+	var flen := 4.0 * 1.1
+	var seg := flen * 0.96
 	for side in [-1.0, 1.0]:
 		var n := int(half_len / seg)
 		for i in range(1, n + 1):
-			var off: float = (3.2 + (i - 0.5) * seg) * side
+			var off: float = (2.9 + (i - 0.5) * seg) * side
 			var fx: float = gate_pos.x + cos(across) * off
 			var fz: float = gate_pos.z + sin(across) * off
-			place_prop(parent, fences[rng.randi() % fences.size()], Vector3(fx, 0, fz), across, 1.1)
-			_static_box(parent, fx, fz, across, seg, 2.0, 0.4)
+			place_prop(parent, fences[rng.randi() % fences.size()], Vector3(fx, 0, fz), yaw, 1.1)
+			_static_box(parent, fx, fz, yaw, flen, 2.0, 0.4)
 			obstacles.append({"x": fx, "z": fz, "r": 1.6})
 
 
@@ -1348,7 +1362,7 @@ static func _forest_belt(parent: Node3D, rng: RandomNumberGenerator, b: Dictiona
 		if _in_area(areas, x, z, 2.0):
 			continue # внутри областей лес не сеем
 		var with_coll := (i % 2 == 0) # коллизия через одно дерево: навмеш легче, лес всё равно труднопроходим
-		_tree(parent, rng, b, x, z, rng.randf_range(1.0, 1.7), with_coll)
+		_tree(parent, rng, b, x, z, rng.randf_range(1.0, 1.7), with_coll, false)
 		if with_coll:
 			obstacles.append({"x": x, "z": z, "r": 0.7})
 
@@ -1399,7 +1413,9 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 
 	# --- вход в подземелье: крипта с аркой на дальнем краю ---
 	var crypt_pos: Vector3 = approach_c + dirv * 8.0
-	var crypt := place_prop(parent, "halloween/crypt.gltf", crypt_pos, road_a + PI, 1.25)
+	# фасад крипты — к дороге: локальная +Z в направлении -dirv
+	var crypt_yaw := atan2(-dirv.x, -dirv.z)
+	var crypt := place_prop(parent, "halloween/crypt.gltf", crypt_pos, crypt_yaw, 1.25)
 	for mi in crypt.find_children("*", "MeshInstance3D", true, false):
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	_static_cylinder(parent, crypt_pos.x, crypt_pos.z, 4.5, 6.0)
@@ -1426,10 +1442,31 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 			obstacles.append({"x": hx, "z": hz, "r": 2.0})
 			spawn_points.append(Vector3(hx + house.dirx * 2.2, 0, hz + house.dirz * 2.2))
 
+	# --- застройка поселения: таверна, кузница, рынок и пара домиков ---
+	# (модели Medieval Hexagon в хекс-масштабе — увеличиваем в 4 раза)
+	var sv := Vector3(-dirv.z, 0, dirv.x)
+	var buildings := [
+		{"m": "medieval/building_tavern_green.gltf", "off": dirv * -9.0 + sv * 8.0, "r": 3.4},
+		{"m": "medieval/building_blacksmith_green.gltf", "off": dirv * 8.0 + sv * 9.0, "r": 3.2},
+		{"m": "medieval/building_market_green.gltf", "off": dirv * -2.0 - sv * 10.0, "r": 3.6},
+		{"m": "medieval/building_home_A_green.gltf", "off": dirv * 10.0 - sv * 7.0, "r": 2.2},
+		{"m": "medieval/building_home_A_green.gltf", "off": dirv * -11.0 - sv * 5.0, "r": 2.2},
+	]
+	for bd in buildings:
+		var bpos: Vector3 = settle_c + bd.off
+		if _road_dist(road, bpos.x, bpos.z) < 4.5:
+			bpos += sv * 4.0 # не ставим здание прямо на дорогу
+		# фасад — к центру площади (локальная +Z смотрит на центр)
+		var to_c := settle_c - bpos
+		var byaw := atan2(to_c.x, to_c.z)
+		place_prop(parent, bd.m, bpos, byaw, 4.0)
+		_static_cylinder(parent, bpos.x, bpos.z, bd.r, 5.0)
+		obstacles.append({"x": bpos.x, "z": bpos.z, "r": bd.r})
+
 	# --- фонари вдоль дороги (ориентиры в сумерках) ---
 	for i in range(6, road.size(), 24):
 		var p: Vector3 = road[i]
-		var lp := place_prop(parent, "halloween/post_lantern.gltf", Vector3(p.x, 0, p.z) + sidev * 1.8, road_a + PI * 0.5, 1.1)
+		var lp := place_prop(parent, "halloween/post_lantern.gltf", Vector3(p.x, 0, p.z) + sidev * 1.8, _yaw_along(road_a), 1.1)
 		var ll := OmniLight3D.new()
 		ll.light_color = Color(1.0, 0.75, 0.4)
 		ll.light_energy = 0.0
@@ -1480,11 +1517,11 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 	# --- лесные пояса: между лагерем и серединой, между серединой и краем ---
 	_forest_belt(parent, rng, b, 26.0, 40.0, 90, road, areas, obstacles)
 	_forest_belt(parent, rng, b, 58.0, 92.0, 150, road, areas, obstacles)
-	# лес за границей мира
+	# лес за границей мира (декорация — без теней)
 	for i in 70:
 		var a := float(i) / 70.0 * TAU + rng.randf_range(-0.05, 0.05)
 		var r := R + rng.randf_range(2.5, 14.0)
-		_tree(parent, rng, b, cos(a) * r, sin(a) * r, rng.randf_range(1.2, 2.0), false)
+		_tree(parent, rng, b, cos(a) * r, sin(a) * r, rng.randf_range(1.2, 2.0), false, false)
 
 	# --- редкие деревья/камни внутри областей ---
 	for area in areas:

@@ -1,5 +1,15 @@
-GNOMOBOY — Shards of the Mountain Heart (v4.0)
+GNOMOBOY — Shards of the Mountain Heart (v4.1)
 ======================================
+
+What's new in 4.1:
+  - Crossbow weapon class: a ranged path — aim with the camera, the server
+    resolves the hit (rate-limited, no PvP for now)
+  - The settlement area now has real buildings (tavern, blacksmith, market,
+    homes) instead of an empty field
+  - Fixed props placed at wrong angles / not forming solid lines (fences,
+    gates, lanterns now align correctly)
+  - Performance: much less frame drop when turning the camera — fewer shadow
+    casters and view-distance culling on distant trees/props
 
 What's new in 4.0 — the Journey Update:
   - The story is no longer arena-hopping: each chapter is a large multi-area

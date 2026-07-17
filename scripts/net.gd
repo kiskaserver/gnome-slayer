@@ -6,7 +6,7 @@ extends Node
 enum Mode { NONE, SINGLE, HOST, CLIENT }
 
 const DEFAULT_PORT := 7777
-const GAME_VERSION := "4.0" # у хоста и клиента должна совпадать
+const GAME_VERSION := "4.1" # у хоста и клиента должна совпадать
 
 var mode: int = Mode.NONE
 var game_mode: String = "pve" # pve | pvp | story
@@ -643,6 +643,26 @@ func req_unequip(slot: String) -> void:
 			game.server_unequip(my_id, slot)
 	else:
 		rpc_id(1, "rpc_req_unequip", slot)
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_bolt_fx(x1: float, z1: float, x2: float, z2: float) -> void:
+	if game != null:
+		game.on_bolt_fx(x1, z1, x2, z2)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_req_shoot(dx: float, dz: float) -> void:
+	if game != null and is_server:
+		game.server_shoot(multiplayer.get_remote_sender_id(), dx, dz)
+
+
+func req_shoot(dx: float, dz: float) -> void:
+	if is_server:
+		if game != null:
+			game.server_shoot(my_id, dx, dz)
+	else:
+		rpc_id(1, "rpc_req_shoot", dx, dz)
 
 
 @rpc("any_peer", "call_remote", "reliable")
