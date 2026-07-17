@@ -54,8 +54,16 @@ var world_obstacles: Array = []
 var world_pois: Array = []
 var world_areas: Array = []          # оверворлд: [{id, kind, center, radius}]
 var world_road: Array = []           # вейпоинты главной дороги
-var dungeon_entrance := Vector3.INF  # точка входа в подземелье (M2)
+var dungeon_entrance := Vector3.INF  # точка входа в подземелье
 var team_checkpoint := Vector2.INF   # чекпоинт отряда (костёр у дороги)
+var boss_spot := Vector3.INF         # зал босса (в подземелье)
+var dungeon_traps: Array = []        # шипы: [{x,z,r}]
+var dungeon_chest_spots: Array = []  # места сундуков в комнатах
+var spawn_override := Vector2.INF    # разовая точка спавна после смены зоны
+var _entrance_hint := Vector2.INF    # где вход в склеп (пронесено сквозь данж)
+var _carry_restored := false         # состояние восстановлено из Net.carry
+var _trap_tick := 0.0
+var portal_mode := "chapter"         # chapter | dungeon_exit
 var _shrine_cd: Dictionary = {}  # индекс точки интереса -> время, когда снова можно благословить
 const SECOND_WIND_HP_FRAC := 0.25
 var _second_wind_used: Dictionary = {}  # id игрока -> уже сработало в этом матче
@@ -153,6 +161,45 @@ func is_story() -> bool:
 	return Net.game_mode == "story"
 
 
+func is_dungeon() -> bool:
+	return is_story() and Net.zone == "dungeon"
+
+
+## Упаковать переносимое состояние перед сменой зоны (сервер).
+func _fill_carry(extra: Dictionary = {}) -> void:
+	Net.carry = {
+		"gold": server_gold,
+		"q_main": q_main, "q_kills": q_kills,
+		"q_side": q_side, "q_side_n": q_side_n,
+		"checkpoint_x": team_checkpoint.x, "checkpoint_y": team_checkpoint.y,
+		"second_wind": _second_wind_used.duplicate(),
+	}
+	for k in extra:
+		Net.carry[k] = extra[k]
+
+
+## Распаковать состояние после смены зоны (сервер, до спавна игроков).
+func _restore_carry() -> void:
+	if Net.carry.is_empty():
+		return
+	_carry_restored = true
+	server_gold = int(Net.carry.get("gold", 0))
+	q_main = int(Net.carry.get("q_main", 0))
+	q_kills = int(Net.carry.get("q_kills", 0))
+	q_side = int(Net.carry.get("q_side", -1))
+	q_side_n = int(Net.carry.get("q_side_n", 0))
+	team_checkpoint = Vector2(Net.carry.get("checkpoint_x", Vector2.INF.x), Net.carry.get("checkpoint_y", Vector2.INF.y))
+	_second_wind_used = Net.carry.get("second_wind", {})
+	if Net.carry.has("return_x"):
+		spawn_override = Vector2(Net.carry.get("return_x"), Net.carry.get("return_z"))
+	if Net.carry.has("entrance_x"):
+		_entrance_hint = Vector2(Net.carry.get("entrance_x"), Net.carry.get("entrance_z"))
+	Net.carry = {}
+	delay(0.5, func():
+		Net.bcast("rpc_gold", [server_gold])
+		_bcast_quest())
+
+
 func diff() -> Dictionary:
 	return Quests.DIFFICULTIES.get(Net.difficulty, Quests.DIFFICULTIES["normal"])
 
@@ -168,9 +215,11 @@ func _ready() -> void:
 		_model_cache["sword_2handed"] = load("res://models/adventurer_items/sword_2handed.gltf")
 	models = _model_cache
 
-	# сюжет живёт в большом мире-путешествии, волны/ПвП — на компактной арене
+	# сюжет живёт в большом мире-путешествии (или в подземелье), волны/ПвП — на арене
 	var data: Dictionary
-	if is_story():
+	if is_dungeon():
+		data = WorldDungeon.build(self, Net.zone_seed)
+	elif is_story():
 		data = WorldGen.build_overworld(self, Net.world_seed, Net.biome)
 	else:
 		data = WorldGen.build(self, Net.world_seed, Net.biome, is_pvp())
@@ -181,8 +230,11 @@ func _ready() -> void:
 	world_areas = data.get("areas", [])
 	world_road = data.get("road", [])
 	dungeon_entrance = data.get("dungeon_entrance", Vector3.INF)
+	boss_spot = data.get("boss_spot", Vector3.INF)
+	dungeon_traps = data.get("traps", [])
+	dungeon_chest_spots = data.get("chest_spots", [])
 	nav_region = data.nav_region
-	if is_story():
+	if is_story() and not is_dungeon():
 		# вырезаем сейф-зону лагеря из навсетки: маршруты врагов
 		# огибают лагерь, а не утыкаются в его границу
 		var hole := NavigationObstacle3D.new()
@@ -198,10 +250,12 @@ func _ready() -> void:
 	nav_region.bake_finished.connect(func(): nav_ready = true)
 	nav_region.bake_navigation_mesh(true)
 
-	daynight = DayNight.new()
-	add_child(daynight)
-	var start_t: float = chapter_cfg().get("start_time", data.biome.start_time) if is_story() else data.biome.start_time
-	daynight.setup(data, data.biome, start_t)
+	if not is_dungeon():
+		# в подземелье нет неба и цикла суток — только факелы и мрак
+		daynight = DayNight.new()
+		add_child(daynight)
+		var start_t: float = chapter_cfg().get("start_time", data.biome.start_time) if is_story() else data.biome.start_time
+		daynight.setup(data, data.biome, start_t)
 
 	_init_fx_pool()
 	_prewarm_pipelines()
@@ -212,22 +266,29 @@ func _ready() -> void:
 	Settings.changed.connect(_apply_gfx_settings)
 	_apply_gfx_settings()
 
-	if is_story():
+	if is_story() and not is_dungeon():
 		_build_camp()
 
 	if Net.is_server:
+		# состояние, пронесённое сквозь смену зоны (золото, квест, чекпоинт)
+		_restore_carry()
 		for id in Net.players:
 			server_on_player_joined(id)
-		# в большом мире-путешествии сундуков больше — по одному на область
-		_server_place_chests(6 if is_story() else 3)
-		if is_pvp():
-			Net.bcast("rpc_wave", [0, false, true])
-		elif is_story():
-			_server_story_begin()
+		# разовая точка входа отработала — дальше обычные правила респавна
+		delay(3.0, func(): spawn_override = Vector2.INF)
+		if is_dungeon():
+			_server_dungeon_begin()
 		else:
-			delay(2.0, func():
-				if not match_over:
-					_start_wave(1))
+			# в большом мире-путешествии сундуков больше — по одному на область
+			_server_place_chests(6 if is_story() else 3)
+			if is_pvp():
+				Net.bcast("rpc_wave", [0, false, true])
+			elif is_story():
+				_server_story_begin()
+			else:
+				delay(2.0, func():
+					if not match_over:
+						_start_wave(1))
 
 
 func _apply_gfx_settings() -> void:
@@ -273,7 +334,8 @@ func server_on_player_joined(id: int) -> void:
 			Net.rpc_id(id, "rpc_chest_spawn", cid, c.x, c.z, c.node.rotation.y)
 			if c.opened:
 				Net.rpc_id(id, "rpc_chest_opened", cid)
-		Net.rpc_id(id, "rpc_daytime", daynight.time)
+		if daynight != null:
+			Net.rpc_id(id, "rpc_daytime", daynight.time)
 		if is_story():
 			Net.rpc_id(id, "rpc_quest", q_main, q_kills, q_side, q_side_n)
 			Net.rpc_id(id, "rpc_gold", server_gold)
@@ -287,6 +349,13 @@ func server_on_player_joined(id: int) -> void:
 
 func _player_spawn_pos() -> Vector2:
 	if is_story():
+		# разовая точка после смены зоны (выход из склепа у крипты)
+		if spawn_override != Vector2.INF:
+			return spawn_override + Vector2(randf_range(-1.5, 1.5), randf_range(-1.5, 1.5))
+		# в подземелье отряд появляется во входном зале
+		if is_dungeon() and not spawn_points.is_empty():
+			var ep: Vector3 = spawn_points[0]
+			return Vector2(ep.x + randf_range(-2.0, 2.0), ep.z + randf_range(-2.0, 2.0))
 		# чекпоинт (костёр у дороги) — точка возрождения отряда, если тронут
 		if team_checkpoint != Vector2.INF:
 			return team_checkpoint + Vector2(randf_range(-2.0, 2.0), randf_range(-2.0, 2.0))
@@ -1706,11 +1775,13 @@ func dialog_closed(advance: String) -> void:
 
 # --- серверная логика квестов ---
 func _server_story_begin() -> void:
-	q_main = 0
-	q_kills = 0
-	q_side = -1
-	q_side_n = 0
-	boss_gid = 0
+	if not _carry_restored:
+		# свежая глава; после возврата из подземелья квест уже восстановлен
+		q_main = 0
+		q_kills = 0
+		q_side = -1
+		q_side_n = 0
+		boss_gid = 0
 	_bcast_quest()
 	max_attackers = maxi(1, 2 + maxi(0, Net.players.size() - 1) + int(diff().tokens))
 	var roles: Dictionary = BIOME_ENEMIES.get(Net.biome, BIOME_ENEMIES["meadow"])
@@ -1718,6 +1789,44 @@ func _server_story_begin() -> void:
 	for i in pop:
 		var types := [roles.melee, roles.melee, roles.fast, roles.caster]
 		server_spawn_gnome(types[i % types.size()])
+	# вернулись из подземелья с недобитым сайд-квестом на сбор — доложить объекты
+	if _carry_restored and q_side == 1:
+		_server_respawn_side_qnodes()
+
+
+## Осколок и подземелье: стартовая населённость данжа + босс в дальнем зале.
+func _server_dungeon_begin() -> void:
+	_bcast_quest()
+	max_attackers = maxi(1, 2 + maxi(0, Net.players.size() - 1) + int(diff().tokens))
+	var roles: Dictionary = BIOME_ENEMIES.get("night", {})  # в склепе всегда нежить
+	# сундуки по комнатам
+	for spot in dungeon_chest_spots:
+		chest_seq += 1
+		Net.bcast("rpc_chest_spawn", [chest_seq, spot.x, spot.z, randf_range(0, TAU)])
+	# охрана комнат
+	var pop: int = maxi(5, diff().story_pop - 2)
+	var types := [roles.melee, roles.melee, roles.fast, roles.caster]
+	for i in pop:
+		var a := randf_range(0, TAU)
+		var r := randf_range(2.0, 5.0)
+		var base: Vector3 = boss_spot if i % 3 == 0 else spawn_points[0]
+		# раскидываем по комнатам: треть у босса, остальные от входа вглубь
+		server_spawn_gnome_at(types[i % types.size()], base + Vector3(cos(a) * r, 0, sin(a) * r), enemy_level())
+	# босс ждёт в дальнем зале
+	if q_main == 2:
+		boss_gid = gnome_seq + 1
+		server_spawn_gnome_at(roles.boss, boss_spot, enemy_level())
+		Net.bcast("rpc_banner", ["ХРАНИТЕЛЬ ОСКОЛКА ЗДЕСЬ"])
+
+
+## Доспавнить недостающие объекты сайд-квеста после возврата из подземелья.
+func _server_respawn_side_qnodes() -> void:
+	var side: Dictionary = chapter_cfg().side
+	if side.get("type", "") != "collect":
+		return # kill-квесты объектов не имеют
+	var need: int = int(side.get("count", 0)) - q_side_n
+	for i in maxi(0, need):
+		_server_spawn_qnode(side.get("kind", "mushroom"))
 
 
 func story_kill_target() -> int:
@@ -1879,9 +1988,9 @@ func _story_on_gnome_died(g) -> void:
 	if q_main == 1 and g.gid != boss_gid:
 		q_kills += 1
 		if q_kills >= story_kill_target():
+			# дорога расчищена — хранитель осколка ждёт в склепе на дальнем краю
 			q_main = 2
-			boss_gid = gnome_seq + 1
-			server_spawn_gnome(roles.boss)
+			Net.bcast("rpc_banner", ["ХРАНИТЕЛЬ ОСКОЛКА — В СКЛЕПЕ НА КРАЮ ЛЕСА"])
 		_bcast_quest()
 	elif q_main == 2 and g.gid == boss_gid:
 		q_main = 3
@@ -1950,9 +2059,49 @@ func _update_story(delta: float) -> void:
 			var p = player_nodes[id]
 			if server_hp.get(id, 0) > 0 and p.global_position.distance_to(portal_pos) < 2.2:
 				portal_open = false
-				_server_chapter_complete()
+				if portal_mode == "dungeon_exit":
+					_server_exit_dungeon()
+				else:
+					_server_chapter_complete()
 				break
-		return # глава уже рассказана — трикл врагов можно не гонять, ждём портал
+		return # ждём, пока игрок сам шагнёт в портал
+
+	# --- подземелье: шипы, выход после осколка; трикл врагов не нужен ---
+	if is_dungeon():
+		_trap_tick -= delta
+		if _trap_tick <= 0:
+			_trap_tick = 0.8
+			for id in player_nodes:
+				if server_hp.get(id, 0) <= 0:
+					continue
+				var pp: Vector3 = player_nodes[id].global_position
+				for t in dungeon_traps:
+					if Vector2(pp.x - t.x, pp.z - t.z).length() < t.r:
+						server_damage_player(id, 6, Vector3(t.x, 0, t.z))
+						break
+		if q_main == 4 and not portal_open and portal_node == null:
+			# осколок взят — открываем портал наружу в зале босса
+			portal_mode = "dungeon_exit"
+			portal_open = true
+			portal_pos = boss_spot
+			Net.bcast("rpc_portal_spawn", [portal_pos.x, portal_pos.z])
+			Net.bcast("rpc_banner", ["ПУТЬ НАРУЖУ ОТКРЫТ"])
+		return
+
+	# --- оверворлд: вход в подземелье, когда пришло время (этап 2) ---
+	if q_main == 2 and dungeon_entrance != Vector3.INF:
+		var near := 0
+		var alive_n := 0
+		for id in player_nodes:
+			if server_hp.get(id, 0) <= 0:
+				continue
+			alive_n += 1
+			if player_nodes[id].global_position.distance_to(dungeon_entrance) < 6.0:
+				near += 1
+		if alive_n > 0 and near == alive_n:
+			_server_enter_dungeon()
+			return
+
 	story_trickle -= delta
 	if story_trickle <= 0:
 		story_trickle = 12.0
@@ -1968,6 +2117,22 @@ func _update_story(delta: float) -> void:
 				types = [roles.fast, roles.fast, roles.melee]
 			for i in 2:
 				server_spawn_gnome(types[randi() % 3])
+
+
+## Вся живая группа у входа в склеп — уходим в подземелье (сервер).
+func _server_enter_dungeon() -> void:
+	# точку входа проносим сквозь данж: выйдя, отряд появится у крипты
+	_fill_carry({"entrance_x": dungeon_entrance.x, "entrance_z": dungeon_entrance.z})
+	Net.bcast("rpc_banner", ["ОТРЯД СПУСКАЕТСЯ В СКЛЕП..."])
+	Net.bcast("rpc_zone", ["dungeon", randi()])
+
+
+## Портал в зале босса ведёт обратно на поверхность (сервер).
+func _server_exit_dungeon() -> void:
+	_fill_carry({"return_x": _entrance_hint.x if _entrance_hint != Vector2.INF else CAMP_POS.x,
+		"return_z": _entrance_hint.y if _entrance_hint != Vector2.INF else CAMP_POS.z})
+	Net.bcast("rpc_banner", ["ОТРЯД ВЫБИРАЕТСЯ НА ПОВЕРХНОСТЬ"])
+	Net.bcast("rpc_zone", ["overworld", Net.world_seed])
 
 
 # --- клиентские обработчики квестов ---
@@ -1991,9 +2156,9 @@ func _update_quest_hud() -> void:
 	match q_main:
 		0: lines.append("◆ " + tr("Поговори с %s") % tr(cfg.npc_main.name))
 		1: lines.append("◆ " + tr("Перебей гномов: %d/%d") % [q_kills, story_kill_target()])
-		2: lines.append("◆ " + tr("Срази вожака!"))
+		2: lines.append("◆ " + (tr("Срази вожака!") if is_dungeon() else tr("Доберись до склепа в конце дороги")))
 		3: lines.append("◆ " + tr("Подбери осколок Сердца"))
-		4: lines.append("◆ " + tr("Вернись к %s") % tr(cfg.npc_main.name))
+		4: lines.append("◆ " + (tr("Войди в портал наружу") if is_dungeon() else tr("Вернись к %s") % tr(cfg.npc_main.name)))
 		5: lines.append("◆ " + tr("Войди в портал"))
 	if q_side == 1:
 		lines.append("◇ " + tr(cfg.side.title) + ": %d/%d" % [q_side_n, cfg.side.count])
@@ -2710,7 +2875,8 @@ func _physics_process(delta: float) -> void:
 		_time_sync -= delta
 		if _time_sync <= 0:
 			_time_sync = 5.0
-			Net.rpc("rpc_daytime", daynight.time)
+			if daynight != null:
+				Net.rpc("rpc_daytime", daynight.time)
 		batch_timer -= delta
 		_batch_full_timer -= delta
 		if batch_timer <= 0:

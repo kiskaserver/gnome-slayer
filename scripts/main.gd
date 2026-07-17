@@ -19,6 +19,7 @@ var _test_killed := false
 var _test_chest := false
 var _test_item_used := false
 var _shot_stage := 0
+var _test_gold_carry := 0
 var _screenshot_path := ""
 var _tod_override := -1.0
 var _test_paused := false
@@ -1623,25 +1624,57 @@ func _process(delta: float) -> void:
 			print("[TEST] story: killed=%d q_main=%d boss_gid=%d" % [killed, game.q_main, game.boss_gid])
 		elif _shot_stage == 2 and _test_timer > 6.0:
 			_shot_stage = 3
+			# дорога зачищена — этап 2: идти к склепу; телепортируемся ко входу
+			print("[TEST] dungeon: pre-enter q_main=%d gold=%d entrance=%s PASS=%s" % [
+				game.q_main, game.server_gold, str(game.dungeon_entrance),
+				str(game.q_main == 2 and game.dungeon_entrance != Vector3.INF)])
+			_test_gold_carry = game.server_gold
+			me3.global_position = game.dungeon_entrance
+		elif _shot_stage == 3 and _test_timer > 8.5:
+			_shot_stage = 4
+			# уже должны быть в подземелье: зона, перенос квеста/золота, босс на месте
 			var boss = game.gnomes.get(game.boss_gid)
+			print("[TEST] dungeon: inside zone=%s q_main=%d gold=%d boss=%s rooms=%s PASS=%s" % [
+				Net.zone, game.q_main, game.server_gold, str(boss != null),
+				str(game.boss_spot != Vector3.INF),
+				str(Net.zone == "dungeon" and game.q_main == 2 and game.server_gold == _test_gold_carry \
+					and boss != null and game.boss_spot != Vector3.INF)])
 			if boss != null and boss.alive:
 				boss.last_attacker = 1
-				boss.server_take_damage(9999, me3.global_position, false)
-			print("[TEST] story: boss killed, q_main=%d" % game.q_main)
-		elif _shot_stage == 3 and _test_timer > 7.5:
-			_shot_stage = 4
+				boss.server_take_damage(99999, boss.global_position + Vector3(1, 0, 0), false)
+			print("[TEST] dungeon: boss killed, q_main=%d PASS=%s" % [game.q_main, str(game.q_main == 3)])
+		elif _shot_stage == 4 and _test_timer > 10.0:
+			_shot_stage = 5
+			var me4: PlayerChar = game.player_nodes.get(Net.my_id)
 			for id in game.qnodes.keys():
 				if game.qnodes[id].kind == "shard":
-					me3.global_position = game.qnodes[id].node.global_position + Vector3(1, 0, 0)
+					me4.global_position = game.qnodes[id].node.global_position + Vector3(1, 0, 0)
 					game.server_qnode_take(1, id)
-			print("[TEST] story: shard taken, q_main=%d" % game.q_main)
+			print("[TEST] dungeon: shard taken, q_main=%d PASS=%s" % [game.q_main, str(game.q_main == 4)])
+		elif _shot_stage == 5 and _test_timer > 11.5:
+			_shot_stage = 6
+			# осколок лежит в зале босса, портал наружу открывается там же —
+			# игрок мог выйти мгновенно (портал под ногами). Оба исхода валидны.
+			if Net.zone == "overworld":
+				print("[TEST] dungeon: exit portal PASS=true (instant exit — portal opened underfoot)")
+			else:
+				print("[TEST] dungeon: exit portal open=%s mode=%s PASS=%s" % [
+					str(game.portal_open), game.portal_mode,
+					str(game.portal_open and game.portal_mode == "dungeon_exit")])
+				me3.global_position = game.portal_pos
+		elif _shot_stage == 6 and _test_timer > 14.0:
+			_shot_stage = 7
+			# вернулись на поверхность: зона, квест и золото пережили оба перехода
+			print("[TEST] dungeon: back zone=%s q_main=%d gold>=carry=%s PASS=%s" % [
+				Net.zone, game.q_main, str(game.server_gold >= _test_gold_carry),
+				str(Net.zone == "overworld" and game.q_main == 4 and game.server_gold >= _test_gold_carry)])
 			game.server_talk(1, "main")
-			# глава больше не завершается мгновенно — открывается портал, и в него
-			# нужно физически войти; в тесте телепортируемся к нему за игрока
-			me3.global_position = game.portal_pos
+			# глава завершается порталом — в него нужно физически войти
+			var me5: PlayerChar = game.player_nodes.get(Net.my_id)
+			me5.global_position = game.portal_pos
 			print("[TEST] story: portal open=%s pos=%s q_main=%d" % [game.portal_open, game.portal_pos, game.q_main])
-		elif _shot_stage == 4 and _test_timer > 14.0:
-			_shot_stage = 5
+		elif _shot_stage == 7 and _test_timer > 20.5:
+			_shot_stage = 8
 			var me_lvl: int = Net.players[1].level
 			print("[TEST] story: now ch=%d biome=%s level=%d xp=%d npcs=%d PASS=%s" % [
 				Net.campaign_chapter, Net.biome, me_lvl, Net.players[1].xp,
