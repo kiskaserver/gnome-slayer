@@ -225,6 +225,11 @@ var special_time := 0.0
 # выход из домика
 var emerge_target := Vector2.ZERO
 
+# привязка к дому (оверворлд): патруль и погоня не уходят далеко от точки спавна
+var home_pos := Vector3.INF
+const HOME_ROAM := 16.0    # радиус патрулирования вокруг дома
+const HOME_LEASH := 42.0   # дальше этого от дома врага не уводит погоня
+
 # уклонение разведчика
 var sidestep_cd := 0.0
 var sidestep_dir := Vector3.ZERO
@@ -264,6 +269,10 @@ func setup(g: Node, id: int, gtype: String, pos: Vector3, emerge_to := Vector2.Z
 	friendly = cfg.get("friendly", false)
 	if friendly:
 		alerted = true # наёмник всегда начеку
+	elif game.is_story():
+		# в мире-путешествии враг привязан к округе своего дома;
+		# на аренах волн/ПвП поводок не нужен — там весь мир и есть округа
+		home_pos = pos
 	elite = is_elite and not friendly
 
 	hp = cfg.hp
@@ -1098,6 +1107,10 @@ func _pick_target(delta: float) -> void:
 			continue
 		if game.in_safe_zone(p.global_position):
 			continue # в лагере игрок недосягаем
+		# поводок: не гонимся за игроком, который увёл бы нас слишком далеко от дома
+		if home_pos != Vector3.INF \
+				and Vector2(p.global_position.x - home_pos.x, p.global_position.z - home_pos.z).length() > HOME_LEASH:
+			continue
 		var d: float = global_position.distance_to(p.global_position)
 		if d < best:
 			best = d
@@ -1291,6 +1304,14 @@ func _loco(fast: bool, moving: bool) -> void:
 
 
 func _random_waypoint() -> Vector2:
+	# на оверворлде гном патрулирует свою округу, а не весь огромный мир
+	if home_pos != Vector3.INF:
+		for _try in 8:
+			var ha := randf_range(0, TAU)
+			var hr := randf_range(3.0, HOME_ROAM)
+			var hwp := Vector2(home_pos.x + cos(ha) * hr, home_pos.z + sin(ha) * hr)
+			if not game.in_safe_zone(Vector3(hwp.x, 0, hwp.y)):
+				return hwp
 	for _try in 8:
 		var a := randf_range(0, TAU)
 		var r := randf_range(5.0, WorldGen.WORLD_RADIUS - 5.0)

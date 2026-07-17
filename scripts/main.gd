@@ -1686,6 +1686,29 @@ func _process(delta: float) -> void:
 						game.server_bounty_read(1, i)
 			print("[TEST] story: poi kinds=%s PASS=%s" % [str(poi_kinds_seen), str(not poi_kinds_seen.is_empty())])
 
+			# оверворлд: области, дорога, вход в подземелье, чекпоинт, поводок
+			print("[TEST] overworld: areas=%d road=%d entrance=%s PASS=%s" % [
+				game.world_areas.size(), game.world_road.size(),
+				str(game.dungeon_entrance != Vector3.INF),
+				str(game.world_areas.size() >= 5 and game.world_road.size() >= 3 and game.dungeon_entrance != Vector3.INF)])
+			var cp_ok := game.team_checkpoint != Vector2.INF
+			print("[TEST] overworld: checkpoint set=%s (campfire rest)" % str(cp_ok))
+			# поводок: у врага с домом далёкая цель игнорируется
+			var leashed = null
+			for g4 in game.gnomes.values():
+				if g4.alive and not g4.friendly and g4.home_pos != Vector3.INF:
+					leashed = g4
+					break
+			if leashed != null:
+				me3.global_position = leashed.home_pos + Vector3(Gnome.HOME_LEASH + 25.0, 0, 0)
+				leashed.target = null
+				leashed.retarget_timer = 0.0
+				leashed._pick_target(0.1)
+				var lp = leashed.target
+				print("[TEST] overworld: leash ignores far player PASS=%s" % str(lp == null or lp is Gnome))
+			else:
+				print("[TEST] overworld: leash SKIP (no leashed enemy alive)")
+
 			# элитный гном: спавн, оглушение, добивающий удар (финишер)
 			var roles2: Dictionary = Game.BIOME_ENEMIES.get(Net.biome, Game.BIOME_ENEMIES["meadow"])
 			game.server_spawn_gnome_at(roles2.melee, me3.global_position + Vector3(3, 0, 0), 1, true)

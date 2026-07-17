@@ -52,6 +52,10 @@ var spawn_points: Array = []
 var houses: Array = []
 var world_obstacles: Array = []
 var world_pois: Array = []
+var world_areas: Array = []          # оверворлд: [{id, kind, center, radius}]
+var world_road: Array = []           # вейпоинты главной дороги
+var dungeon_entrance := Vector3.INF  # точка входа в подземелье (M2)
+var team_checkpoint := Vector2.INF   # чекпоинт отряда (костёр у дороги)
 var _shrine_cd: Dictionary = {}  # индекс точки интереса -> время, когда снова можно благословить
 const SECOND_WIND_HP_FRAC := 0.25
 var _second_wind_used: Dictionary = {}  # id игрока -> уже сработало в этом матче
@@ -164,11 +168,19 @@ func _ready() -> void:
 		_model_cache["sword_2handed"] = load("res://models/adventurer_items/sword_2handed.gltf")
 	models = _model_cache
 
-	var data := WorldGen.build(self, Net.world_seed, Net.biome, is_pvp())
+	# сюжет живёт в большом мире-путешествии, волны/ПвП — на компактной арене
+	var data: Dictionary
+	if is_story():
+		data = WorldGen.build_overworld(self, Net.world_seed, Net.biome)
+	else:
+		data = WorldGen.build(self, Net.world_seed, Net.biome, is_pvp())
 	spawn_points = data.spawn_points
 	houses = data.houses
 	world_obstacles = data.obstacles
 	world_pois = data.get("pois", [])
+	world_areas = data.get("areas", [])
+	world_road = data.get("road", [])
+	dungeon_entrance = data.get("dungeon_entrance", Vector3.INF)
 	nav_region = data.nav_region
 	if is_story():
 		# вырезаем сейф-зону лагеря из навсетки: маршруты врагов
@@ -206,7 +218,8 @@ func _ready() -> void:
 	if Net.is_server:
 		for id in Net.players:
 			server_on_player_joined(id)
-		_server_place_chests(3)
+		# в большом мире-путешествии сундуков больше — по одному на область
+		_server_place_chests(6 if is_story() else 3)
 		if is_pvp():
 			Net.bcast("rpc_wave", [0, false, true])
 		elif is_story():
@@ -274,6 +287,9 @@ func server_on_player_joined(id: int) -> void:
 
 func _player_spawn_pos() -> Vector2:
 	if is_story():
+		# чекпоинт (костёр у дороги) — точка возрождения отряда, если тронут
+		if team_checkpoint != Vector2.INF:
+			return team_checkpoint + Vector2(randf_range(-2.0, 2.0), randf_range(-2.0, 2.0))
 		return Vector2(CAMP_POS.x + randf_range(-2.5, 2.5), CAMP_POS.z + randf_range(1.0, 4.0))
 	if is_pvp():
 		var a := randf_range(0, TAU)
@@ -589,6 +605,28 @@ func enemy_level() -> int:
 const ELITE_CHANCE := 0.07
 
 
+## Домики областей, рядом с которыми есть живые игроки (оверворлд): враги
+## лезут из нор там, где отряд, а не по всей огромной карте.
+func _active_houses() -> Array:
+	if world_areas.is_empty():
+		return houses
+	var out: Array = []
+	for house in houses:
+		var aid: String = house.get("area", "")
+		for area in world_areas:
+			if area.id != aid:
+				continue
+			for id in player_nodes:
+				if server_hp.get(id, 0) <= 0:
+					continue
+				var pp: Vector3 = player_nodes[id].global_position
+				if Vector2(pp.x - area.center.x, pp.z - area.center.z).length() < area.radius + 18.0:
+					out.append(house)
+					break
+			break
+	return out if not out.is_empty() else houses
+
+
 func server_spawn_gnome(type: String) -> void:
 	gnome_seq += 1
 	var px: float
@@ -603,7 +641,8 @@ func server_spawn_gnome(type: String) -> void:
 		ex = px * 0.85
 		ez = pz * 0.85
 	else:
-		var house: Dictionary = houses[randi() % houses.size()]
+		var pool := _active_houses()
+		var house: Dictionary = pool[randi() % pool.size()]
 		px = house.x + house.dirx * 2.15
 		pz = house.z + house.dirz * 2.15
 		ex = house.x + house.dirx * 4.8 + randf_range(-1.2, 1.2)
@@ -1727,9 +1766,16 @@ func _server_spawn_qnode(kind: String, at := Vector3.INF) -> void:
 	var pos := at
 	if pos == Vector3.INF:
 		for _try in 60:
-			var a := randf_range(0, TAU)
-			var r := randf_range(10.0, WorldGen.WORLD_RADIUS - 5.0)
-			pos = Vector3(cos(a) * r, 0, sin(a) * r)
+			if not world_areas.is_empty():
+				# оверворлд: квест-объекты внутри областей вдоль пути (не в глухом лесу)
+				var area: Dictionary = world_areas[randi() % world_areas.size()]
+				var aa := randf_range(0, TAU)
+				var ar: float = area.radius * randf_range(0.3, 0.8)
+				pos = Vector3(area.center.x + cos(aa) * ar, 0, area.center.z + sin(aa) * ar)
+			else:
+				var a := randf_range(0, TAU)
+				var r := randf_range(10.0, WorldGen.WORLD_RADIUS - 5.0)
+				pos = Vector3(cos(a) * r, 0, sin(a) * r)
 			if pos.distance_to(CAMP_POS) > SAFE_RADIUS + 2.0 and _clear_of_houses(pos):
 				break
 	Net.bcast("rpc_qnode", [qnode_seq, kind, pos.x, pos.z])
@@ -2088,10 +2134,20 @@ func _server_place_chests(count: int) -> void:
 	for _try in 60:
 		if placed >= count:
 			break
-		var a := randf_range(0, TAU)
-		var r := randf_range(8.0, WorldGen.WORLD_RADIUS - 5.0)
-		var x := cos(a) * r
-		var z := sin(a) * r
+		var x: float
+		var z: float
+		if not world_areas.is_empty():
+			# оверворлд: сундуки внутри областей (есть смысл исследовать каждую)
+			var area: Dictionary = world_areas[randi() % world_areas.size()]
+			var aa := randf_range(0, TAU)
+			var ar: float = area.radius * randf_range(0.3, 0.85)
+			x = area.center.x + cos(aa) * ar
+			z = area.center.z + sin(aa) * ar
+		else:
+			var a := randf_range(0, TAU)
+			var r := randf_range(8.0, WorldGen.WORLD_RADIUS - 5.0)
+			x = cos(a) * r
+			z = sin(a) * r
 		var ok := true
 		for h in houses:
 			if Vector2(h.x - x, h.z - z).length() < 5.0:
@@ -2244,6 +2300,10 @@ func server_campfire_rest(sender: int, idx: int) -> void:
 	server_shield[sender] = server_shield.get(sender, 0) + 25
 	Net.bcast("rpc_buff", [sender, "shield", 20.0])
 	Net.bcast("rpc_banner", [Quests.LORE_CAMPFIRE_BANNER])
+	# в мире-путешествии тронутый костёр становится чекпоинтом отряда
+	if not world_areas.is_empty():
+		team_checkpoint = Vector2(world_pois[idx].x, world_pois[idx].z)
+		Net.send_sys(sender, "Костёр запомнил вас: отряд возродится здесь.")
 
 
 ## Колодец: чистый хил без бафа, но чаще доступен, чем костёр или святилище.
