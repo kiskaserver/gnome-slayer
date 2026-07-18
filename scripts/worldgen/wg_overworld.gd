@@ -123,6 +123,9 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 	# --- тупички-кеши от дороги: тайник с отблеском, сундук поставит сервер ---
 	var caches := WgCores._road_caches(parent, rng, main_samples, areas, obstacles)
 
+	# --- взрывные бочки (D1): удар по бочке — взрыв, цепная детонация ---
+	var barrels := WgCores.scatter_barrels(parent, rng, areas, road, obstacles)
+
 	# --- точки интереса: по одной на область (кроме лагеря и подхода) ---
 	var poi_kinds := ["ruins", "standing_stones", "shrine", "campfire", "well", "bounty_board", "crypt", "battlefield"]
 	for i in range(poi_kinds.size() - 1, 0, -1):
@@ -220,4 +223,4 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 		"sun": envd.sun, "moon": envd.moon, "env": envd.env, "sky_mat": envd.sky_mat,
 		"biome": b, "obstacles": obstacles, "pois": pois,
 		"areas": areas, "road": road_pts, "dungeon_entrance": dungeon_entrance,
-		"caches": caches}
+		"caches": caches, "barrels": barrels}

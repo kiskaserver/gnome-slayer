@@ -323,6 +323,12 @@ func rpc_secret_opened() -> void:
 
 
 @rpc("authority", "call_local", "reliable")
+func rpc_barrel_boom(bid: int) -> void:
+	if game != null:
+		game.on_barrel_boom(bid)
+
+
+@rpc("authority", "call_local", "reliable")
 func rpc_door_opened() -> void:
 	if game != null:
 		game.on_door_opened()

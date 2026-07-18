@@ -53,6 +53,7 @@ var houses: Array = []
 var world_obstacles: Array = []
 var world_pois: Array = []
 var world_caches: Array = []         # тайники у тупичков дороги: сюда встают первые сундуки
+var barrels: Dictionary = {}         # взрывные бочки: bid -> {x, z, node, alive}
 var world_areas: Array = []          # оверворлд: [{id, kind, center, radius}]
 var world_road: Array = []           # вейпоинты главной дороги
 var dungeon_entrance := Vector3.INF  # точка входа в подземелье
@@ -236,6 +237,10 @@ func _ready() -> void:
 	world_road = data.get("road", [])
 	dungeon_entrance = data.get("dungeon_entrance", Vector3.INF)
 	world_caches = data.get("caches", [])
+	# бочки детерминированы сидом на всех машинах — bid совпадают без синка
+	var blist: Array = data.get("barrels", [])
+	for i in blist.size():
+		barrels[i + 1] = {"x": blist[i].x, "z": blist[i].z, "node": blist[i].node, "alive": true}
 	boss_spot = data.get("boss_spot", Vector3.INF)
 	dungeon_traps = data.get("traps", [])
 	dungeon_chest_spots = data.get("chest_spots", [])
@@ -1553,6 +1558,44 @@ func on_chest_spawn(cid: int, x: float, z: float, rot: float) -> void:
 	fx_burst(Vector3(x, 0.6, z), Color(1.0, 0.85, 0.4), 10)
 
 
+## Взрыв бочки (сервер): урон по площади обеим сторонам, цепная детонация.
+func server_explode_barrel(bid: int, attacker: int = 0) -> void:
+	var b: Dictionary = barrels.get(bid, {})
+	if b.is_empty() or not b.alive or match_over:
+		return
+	b.alive = false
+	Net.bcast("rpc_barrel_boom", [bid])
+	var pos := Vector3(b.x, 0, b.z)
+	for id in player_nodes:
+		if server_hp.get(id, 0) > 0 and player_nodes[id].global_position.distance_to(pos) < 3.2:
+			server_damage_player(id, 25, pos)
+	for g in gnomes.values():
+		if g.alive and g.global_position.distance_to(pos) < 3.6:
+			g.last_attacker = attacker
+			g.last_attacker_gid = 0
+			g.server_take_damage(35, pos, false)
+	# цепная детонация соседних бочек — с мгновением на разлёт огня
+	for obid in barrels:
+		var ob: Dictionary = barrels[obid]
+		if ob.alive and Vector2(ob.x - b.x, ob.z - b.z).length() < 3.2:
+			var chain_bid: int = obid
+			delay(0.22, func(): server_explode_barrel(chain_bid, attacker))
+
+
+## Бочка рванула (все машины): огонь, грохот, сама бочка исчезает.
+func on_barrel_boom(bid: int) -> void:
+	var b: Dictionary = barrels.get(bid, {})
+	if b.is_empty():
+		return
+	b.alive = false
+	var pos := Vector3(b.x, 0.6, b.z)
+	fx_burst(pos, Color(1.0, 0.55, 0.15), 26)
+	fx_burst(pos + Vector3(0, 0.5, 0), Color(0.35, 0.3, 0.28), 14)
+	Sfx.play_at("explode", pos, 3.0, 0.95)
+	if is_instance_valid(b.get("node")):
+		b.node.queue_free()
+
+
 ## Рядом ли неоткрытая секретная кладка (для подсказки и интеракции).
 func secret_near(pos: Vector3, radius: float) -> bool:
 	if dungeon_secret.is_empty() or dungeon_secret.get("opened", false):
@@ -1940,6 +1983,11 @@ func _update_bombs(delta: float) -> void:
 				for pid in player_nodes:
 					if server_hp.get(pid, 0) > 0 and player_nodes[pid].global_position.distance_to(pos) < 3.0:
 						server_damage_player(pid, 25, pos)
+			# бомба детонирует взрывные бочки поблизости
+			for bbid in barrels:
+				var bb: Dictionary = barrels[bbid]
+				if bb.alive and Vector2(bb.x - pos.x, bb.z - pos.z).length() < 3.0:
+					server_explode_barrel(bbid, 0)
 
 
 # ---------------------------------------------------------------------------

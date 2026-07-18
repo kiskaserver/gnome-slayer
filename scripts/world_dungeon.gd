@@ -399,6 +399,19 @@ static func build(parent: Node3D, zone_seed: int) -> Dictionary:
 	for spot in reward_spots:
 		WorldGen.place_prop(parent, "dungeon/torch_lit.gltf.glb", spot + Vector3(0, 0, -0.7), 0.0, 1.0)
 
+	# --- взрывные бочки (D1): пара в комнатах — рискованное подспорье в бою ---
+	var barrels: Array = []
+	for _b in 2:
+		for _try in 20:
+			var br: Dictionary = rooms[rng.randi_range(1, maxi(1, rooms.size() - 2))]
+			var bx: float = br.center.x + rng.randf_range(-(br.w - 1) * CELL * 0.35, (br.w - 1) * CELL * 0.35)
+			var bz: float = br.center.z + rng.randf_range(-(br.h - 1) * CELL * 0.35, (br.h - 1) * CELL * 0.35)
+			if Vector2(bx - br.center.x, bz - br.center.z).length() < 1.5 or not WgGeom._clear_of(obstacles, bx, bz, 0.6, 0.5):
+				continue
+			barrels.append(WgCores.explosive_barrel(parent, rng, bx, bz))
+			obstacles.append({"x": bx, "z": bz, "r": 0.6})
+			break
+
 	# --- ловушки: шипы в коридорах + жаровни (огонь жжётся сильнее) ---
 	var traps: Array = []
 	if corridor_cells.size() > 4:
@@ -439,4 +452,4 @@ static func build(parent: Node3D, zone_seed: int) -> Dictionary:
 		"rooms": rooms, "boss_spot": boss_room.center, "entry_spot": entry.center,
 		"chest_spots": chest_spots, "traps": traps, "theme": theme_id,
 		"secret": secret, "door": door, "miniboss_spot": mini_room.center,
-		"reward_spots": reward_spots}
+		"reward_spots": reward_spots, "barrels": barrels}

@@ -274,6 +274,52 @@ static func _core_cemetery(parent: Node3D, rng: RandomNumberGenerator, c: Vector
 	lp.add_child(ll)
 
 
+## Взрывная бочка (D1): красноватый бок выдаёт опасность; коллайдер живёт
+## внутри узла и исчезает вместе с бочкой при детонации.
+static func explosive_barrel(parent: Node3D, rng: RandomNumberGenerator, x: float, z: float) -> Dictionary:
+	var node := WgLib.place_prop(parent, "dungeon/barrel_large.gltf.glb", Vector3(x, 0, z), rng.randf_range(0, TAU), 1.05)
+	for mi in node.find_children("*", "MeshInstance3D", true, false):
+		for i in mi.get_surface_override_material_count():
+			var mat = mi.get_active_material(i)
+			if mat != null:
+				var m2 = mat.duplicate()
+				m2.albedo_color = Color(m2.albedo_color.r, m2.albedo_color.g * 0.45, m2.albedo_color.b * 0.35, 1.0)
+				mi.set_surface_override_material(i, m2)
+	var body := StaticBody3D.new()
+	body.collision_layer = 1
+	body.collision_mask = 0
+	var cs := CollisionShape3D.new()
+	var cyl := CylinderShape3D.new()
+	cyl.radius = 0.55
+	cyl.height = 1.4
+	cs.shape = cyl
+	cs.position.y = 0.7
+	body.add_child(cs)
+	node.add_child(body)
+	return {"x": x, "z": z, "node": node}
+
+
+## Раскидать взрывные бочки по областям: гуще там, где бой (поле боя, табір).
+static func scatter_barrels(parent: Node3D, rng: RandomNumberGenerator, areas: Array, road: Array, obstacles: Array) -> Array:
+	var out: Array = []
+	for area in areas:
+		if area.kind == "camp":
+			continue
+		var n := 2 if area.kind in ["battlefield", "enemy_camp"] else 1
+		for _i in n:
+			for _try in 25:
+				var a := rng.randf_range(0, TAU)
+				var r: float = area.radius * rng.randf_range(0.25, 0.8)
+				var bx: float = area.center.x + cos(a) * r
+				var bz: float = area.center.z + sin(a) * r
+				if not WgGeom._clear_of(obstacles, bx, bz, 0.6, 0.7) or WgGeom._road_dist(road, bx, bz) < 2.4:
+					continue
+				out.append(explosive_barrel(parent, rng, bx, bz))
+				obstacles.append({"x": bx, "z": bz, "r": 0.6})
+				break
+	return out
+
+
 ## Тупички-кеши: от магистрали ответвляется короткая тропа к тайнику —
 ## монеты, бочка и тёплый отблеск. Позицию возвращаем: сервер поставит сундук.
 static func _road_caches(parent: Node3D, rng: RandomNumberGenerator, main_samples: Array, areas: Array, obstacles: Array) -> Array:

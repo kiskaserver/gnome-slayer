@@ -42,6 +42,12 @@ func server_handle_melee(sender: int, targets: Array, dmg: int, crit: bool) -> v
 			var pn = game.player_nodes.get(pid)
 			if pn != null and pn.global_position.distance_to(sn.global_position) < 6.5:
 				server_damage_player(pid, dmg, sn.global_position, sender)
+		elif t[0] == "b":
+			var bid := int(t[1])
+			var b: Dictionary = game.barrels.get(bid, {})
+			if not b.is_empty() and b.alive \
+					and Vector2(b.x - sn.global_position.x, b.z - sn.global_position.z).length() < 6.5:
+				game.server_explode_barrel(bid, sender)
 
 
 func server_damage_player(id: int, dmg: int, from_pos: Vector3, attacker: int = 0) -> void:

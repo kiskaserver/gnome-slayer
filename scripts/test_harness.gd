@@ -584,6 +584,23 @@ func tick(delta: float) -> void:
 					elite_max_hp, elite_g.elite, not elite_g.alive, str(elite_g.elite and not elite_g.alive)])
 			else:
 				print("[TEST] story: elite gnome spawn FAIL (not found)")
+			# бочки (D1): взрыв ранит гнома рядом; сама бочка исчезает
+			if not game.barrels.is_empty():
+				var bid0: int = game.barrels.keys()[0]
+				var b0: Dictionary = game.barrels[bid0]
+				game.server_spawn_gnome_at(roles2.melee, Vector3(b0.x + 1.6, 0, b0.z), 1)
+				var vgid: int = game.gnome_seq
+				await get_tree().process_frame
+				await get_tree().process_frame
+				var victim = game.gnomes.get(vgid)
+				var vhp0: int = victim.hp if victim != null else -1
+				game.server_explode_barrel(bid0, 1)
+				var vhp1: int = victim.hp if victim != null else -1
+				print("[TEST] barrels: count=%d exploded=%s victim hp %d->%d PASS=%s" % [
+					game.barrels.size(), str(not b0.alive), vhp0, vhp1,
+					str(not b0.alive and victim != null and (vhp1 < vhp0 or not victim.alive))])
+			else:
+				print("[TEST] barrels: count=0 PASS=false")
 			print("[TEST] achievements: unlocked=%d lore=%d/%d" % [
 				Achievements.count_unlocked(), Achievements.lore_progress().x, Achievements.lore_progress().y])
 

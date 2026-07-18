@@ -105,6 +105,11 @@ func deal_damage(step: Dictionary) -> void:
 				continue
 			if _in_arc(pl.global_position, step.range + 0.45, step.arc):
 				targets.append(["p", id])
+	# взрывные бочки — тоже цель замаха
+	for bid in p.game.barrels:
+		var b = p.game.barrels[bid]
+		if b.alive and _in_arc(Vector3(b.x, 0, b.z), step.range + 0.45, step.arc):
+			targets.append(["b", bid])
 	if targets.is_empty():
 		return
 	var me: Dictionary = Net.players.get(Net.my_id, {})
