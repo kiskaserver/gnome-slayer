@@ -58,128 +58,50 @@ var my_id: int:
 
 
 func _ready() -> void:
+	session = NetSession.new(self)
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	multiplayer.connection_failed.connect(_on_connection_failed)
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
 
 
-## Требует уже выставленного campaign_chapter — для сюжета биом берётся по
-## текущей главе, а не всегда по первой (иначе продолжение с 3-й главы грузило
-## поляну вместо зимы до первого перехода через портал).
+var session: NetSession # жизненный цикл сессии (net_session.gd)
+
+
 func _resolve_biome() -> void:
-	if game_mode == "story":
-		var ci: int = clampi(campaign_chapter - 1, 0, Quests.CHAPTER_BIOMES.size() - 1)
-		biome = Quests.CHAPTER_BIOMES[ci]
-	elif biome_choice == "random":
-		biome = WorldGen.BIOME_LIST[randi() % WorldGen.BIOME_LIST.size()]
-	else:
-		biome = biome_choice
+	session.resolve_biome()
 
 
 func start_single(mode_name: String = "pve") -> void:
-	mode = Mode.SINGLE
-	game_mode = mode_name
-	world_seed = randi()
-	campaign_chapter = Save.chapter if (game_mode == "story" and continue_campaign) else 1
-	sides_mask = Save.sides_mask if (game_mode == "story" and continue_campaign) else 0
-	_resolve_biome()
-	players = {1: _fresh_player(my_name)}
+	session.start_single(mode_name)
 
 
 func start_host(port: int, mode_name: String, private := false) -> Error:
-	var peer := ENetMultiplayerPeer.new()
-	var err := peer.create_server(port, MAX_PARTY)
-	if err != OK:
-		return err
-	peer.host.compress(ENetConnection.COMPRESS_RANGE_CODER)
-	multiplayer.multiplayer_peer = peer
-	mode = Mode.HOST
-	game_mode = mode_name
-	host_port = port
-	session_private = private
-	party_id = "gs-%d-%d" % [randi(), randi()] # уникальна на сессию, для Discord-пати
-	world_seed = randi()
-	campaign_chapter = Save.chapter if (game_mode == "story" and continue_campaign) else 1
-	sides_mask = Save.sides_mask if (game_mode == "story" and continue_campaign) else 0
-	_resolve_biome()
-	players = {1: _fresh_player(my_name)}
-	return OK
+	return session.start_host(port, mode_name, private)
 
 
 func start_client(ip: String, port: int) -> Error:
-	var peer := ENetMultiplayerPeer.new()
-	var err := peer.create_client(ip, port)
-	if err != OK:
-		return err
-	peer.host.compress(ENetConnection.COMPRESS_RANGE_CODER)
-	multiplayer.multiplayer_peer = peer
-	mode = Mode.CLIENT
-	players = {}
-	return OK
+	return session.start_client(ip, port)
 
 
-## Все локальные IPv4-адреса хоста (LAN/VPN), кроме петлевого — их и передаём
-## в секрете приглашения, чтобы присоединяющийся перебрал их по очереди.
 func local_ipv4() -> Array:
-	var out: Array = []
-	for a in IP.get_local_addresses():
-		if a.count(".") == 3 and not a.begins_with("127.") and not a.begins_with("169.254."):
-			if not out.has(a):
-				out.append(a)
-	return out
+	return session.local_ipv4()
 
 
-## Секрет присоединения для Discord: base64(JSON) с адресами хоста и портом.
-## Discord доставляет эту строку тому, кто нажал «Join», игра сама подключается.
 func build_join_secret() -> String:
-	var payload := {"ips": local_ipv4(), "port": host_port, "v": 1}
-	return Marshalls.utf8_to_base64(JSON.stringify(payload))
+	return session.build_join_secret()
 
 
-## Разбор секрета из Discord: {ips:[...], port:int} или {} при ошибке.
 func parse_join_secret(secret: String) -> Dictionary:
-	var raw := Marshalls.base64_to_utf8(secret)
-	if raw == "":
-		return {}
-	var data = JSON.parse_string(raw)
-	if typeof(data) != TYPE_DICTIONARY or not data.has("ips") or not data.has("port"):
-		return {}
-	return data
+	return session.parse_join_secret(secret)
 
 
 func shutdown(reason: String = "") -> void:
-	if multiplayer.multiplayer_peer != null and mode in [Mode.HOST, Mode.CLIENT]:
-		multiplayer.multiplayer_peer.close()
-	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
-	mode = Mode.NONE
-	players = {}
-	game = null
-	if reason != "":
-		session_ended.emit(reason)
+	session.shutdown(reason)
 
 
-## Пинг (мс): клиент — до сервера, хост — худший из пингов клиентов.
-## −1, если сессии нет (одиночка) или мерить не с кем.
 func ping_ms() -> int:
-	if multiplayer.multiplayer_peer == null:
-		return -1
-	if mode == Mode.CLIENT:
-		var peer: ENetPacketPeer = multiplayer.multiplayer_peer.get_peer(1)
-		if peer == null:
-			return -1
-		return peer.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME)
-	if mode == Mode.HOST:
-		var worst := -1
-		for pid in players:
-			if pid == 1:
-				continue
-			var peer: ENetPacketPeer = multiplayer.multiplayer_peer.get_peer(pid)
-			if peer != null:
-				worst = maxi(worst, peer.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME))
-		return worst
-	return -1
-
+	return session.ping_ms()
 
 # ---------------------------------------------------------------------------
 # Соединения
