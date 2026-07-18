@@ -31,6 +31,8 @@ func start_attack() -> void:
 	p.combo_queued = false
 	p.attack_dur = p._play(step.anim, step.ts)
 	Sfx.play_at("swing", p.global_position)
+	if p.is_local and p.game.tutorial != null:
+		p.game.tutorial.notify("attack")
 	if p.is_ranged_weapon():
 		p.facing = p.cam_yaw.rotation.y + PI # арбалет целится по камере, не по ближайшему врагу
 	else:
@@ -90,6 +92,8 @@ func try_dodge() -> void:
 	p.state = "dodge"
 	p.state_time = 0.0
 	p.iframes = 0.45
+	if p.is_local and p.game.tutorial != null:
+		p.game.tutorial.notify("dodge")
 	var me: Dictionary = Net.players.get(Net.my_id, {})
 	p.dodge_cooldown = 0.9 * (1.0 - 0.05 * me.get("agi", 0)) * Skills.dodge_cd_mult(me) if p.is_local else 0.9
 	var dir: Vector3 = p._move_dir if p._move_dir.length_squared() > 0.01 else Vector3(sin(p.facing), 0, cos(p.facing))

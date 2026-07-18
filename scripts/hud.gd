@@ -6,6 +6,7 @@ var hp_fill: ColorRect
 var hp_back: ColorRect
 var stam_back: ColorRect
 var stam_fill: ColorRect
+var tut_label: Label
 var kills_label: Label
 var wave_label: Label
 var banner_label: Label
@@ -104,6 +105,19 @@ func _ready() -> void:
 	stam_fill.position = Vector2(1, 1)
 	stam_fill.size = Vector2(318, 8)
 	stam_back.add_child(stam_fill)
+
+	# --- строка обучения: верх по центру, золотая, видна и в бою ---
+	tut_label = Label.new()
+	tut_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	tut_label.position = Vector2(-460, 66)
+	tut_label.size = Vector2(920, 28)
+	tut_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tut_label.add_theme_font_size_override("font_size", 17)
+	tut_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.55))
+	tut_label.add_theme_constant_override("outline_size", 8)
+	tut_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
+	tut_label.text = ""
+	add_child(tut_label)
 
 	# --- счёт справа сверху ---
 	kills_label = Label.new()
@@ -561,6 +575,11 @@ func _ignore_mouse_recursive(node: Node) -> void:
 		node.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	for c in node.get_children():
 		_ignore_mouse_recursive(c)
+
+
+## Строка текущего шага обучения; пустая — скрыта.
+func set_tutorial(text: String) -> void:
+	tut_label.text = text
 
 
 ## Полоса стамины: k в [0..1]; при истощении подсвечивается тревожным.

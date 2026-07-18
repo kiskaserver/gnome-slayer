@@ -475,6 +475,12 @@ func _toggle_pause() -> void:
 	var b_settings := _styled_button(tr("НАСТРОЙКИ"))
 	box.add_child(b_settings)
 	b_settings.pressed.connect(_open_settings)
+	if game != null and game.tutorial != null and game.tutorial.active:
+		var b_skip_tut := _styled_button(tr("Пропустить обучение"))
+		box.add_child(b_skip_tut)
+		b_skip_tut.pressed.connect(func():
+			game.tutorial.skip()
+			_resume())
 	var b_leave := _styled_button(tr("ПОКИНУТЬ ИГРУ"))
 	box.add_child(b_leave)
 	b_leave.pressed.connect(func():

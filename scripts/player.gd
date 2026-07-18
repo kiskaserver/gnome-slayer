@@ -273,6 +273,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		var dy: float = event.relative.y * (-1.0 if Settings.invert_y else 1.0)
 		cam_yaw.rotation.y -= event.relative.x * sens
 		cam_pitch.rotation.x = clampf(cam_pitch.rotation.x - dy * sens * 0.85, -1.15, 0.35)
+		if game.tutorial != null:
+			game.tutorial.notify("camera", absf(event.relative.x) * sens)
 	if event.is_action_pressed("attack"):
 		try_attack()
 	elif event.is_action_pressed("dodge"):

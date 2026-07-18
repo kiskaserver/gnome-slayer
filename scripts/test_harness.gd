@@ -60,6 +60,10 @@ func handle_cmdline() -> void:
 			_test_mode = "single"
 			Net.start_single("pve")
 			main.enter_game()
+		elif arg == "--test-tutorial":
+			_test_mode = "tutorial"
+			Net.start_single("story")
+			main.enter_game()
 		elif arg == "--test-story":
 			_test_mode = "story"
 			if _start_chapter > 1:
@@ -688,6 +692,82 @@ func tick(delta: float) -> void:
 			else:
 				print("[TEST] crossbow: target spawn FAIL")
 			get_tree().quit()
+
+	# обучение (D2): скриптованное прохождение всех шагов + флаг на диске
+	if _test_mode == "tutorial" and game != null:
+		var tut = game.tutorial
+		if _shot_stage == 0 and _test_timer > 2.0:
+			_shot_stage = 1
+			print("[TEST] tutorial: created=%s step=%s" % [
+				str(tut != null and tut.active), tut.STEPS[tut.step] if tut != null else "-"])
+			if tut == null:
+				get_tree().quit()
+				return
+			tut.notify("move", 5.0)
+			tut.notify("camera", 1.5)
+		elif _shot_stage == 1 and _test_timer > 2.6:
+			_shot_stage = 2
+			print("[TEST] tutorial: move done -> %s PASS=%s" % [tut.STEPS[tut.step], str(tut.STEPS[tut.step] == "sprint")])
+			tut.notify("sprint", 1.5)
+		elif _shot_stage == 2 and _test_timer > 3.2:
+			_shot_stage = 3
+			print("[TEST] tutorial: sprint done -> %s PASS=%s" % [tut.STEPS[tut.step], str(tut.STEPS[tut.step] == "attack")])
+			var me_t: PlayerChar = game.player_nodes.get(Net.my_id)
+			for i in 3: # три настоящих замаха (notify дёргает start_attack)
+				me_t.state = "idle"
+				me_t.combat.start_attack()
+			me_t.state = "idle"
+		elif _shot_stage == 3 and _test_timer > 3.8:
+			_shot_stage = 4
+			print("[TEST] tutorial: attack done -> %s PASS=%s" % [tut.STEPS[tut.step], str(tut.STEPS[tut.step] == "defense")])
+			tut.notify("block", 1.0)
+			var me_t2: PlayerChar = game.player_nodes.get(Net.my_id)
+			me_t2.state = "idle"
+			me_t2.dodge_cooldown = 0.0
+			me_t2.stamina = me_t2.STAM_MAX
+			me_t2.combat.try_dodge() # notify("dodge") внутри
+			me_t2.state = "idle"
+		elif _shot_stage == 4 and _test_timer > 4.4:
+			_shot_stage = 5
+			print("[TEST] tutorial: defense done -> %s PASS=%s" % [tut.STEPS[tut.step], str(tut.STEPS[tut.step] == "chest")])
+			var me_t3: PlayerChar = game.player_nodes.get(Net.my_id)
+			for cid in game.chests:
+				var ch: Dictionary = game.chests[cid]
+				me_t3.global_position = Vector3(ch.x + 1.0, 0, ch.z)
+				game.server_open_chest(1, cid) # on_chest_opened дёрнет notify
+				break
+		elif _shot_stage == 5 and _test_timer > 5.0:
+			_shot_stage = 6
+			print("[TEST] tutorial: chest done -> %s PASS=%s" % [tut.STEPS[tut.step], str(tut.STEPS[tut.step] == "inventory")])
+			game.hud.toggle_inventory(game.inventory, game.my_equip)
+		elif _shot_stage == 6 and _test_timer > 5.6:
+			_shot_stage = 7
+			print("[TEST] tutorial: inventory done -> %s PASS=%s" % [tut.STEPS[tut.step], str(tut.STEPS[tut.step] == "stats")])
+			game.hud.toggle_inventory([], {}) # закрыть
+			game.hud.toggle_stats(Net.players[1])
+		elif _shot_stage == 7 and _test_timer > 6.2:
+			_shot_stage = 8
+			print("[TEST] tutorial: stats done -> %s PASS=%s" % [tut.STEPS[tut.step], str(tut.STEPS[tut.step] == "item")])
+			game.hud.toggle_stats({}) # закрыть
+			game._server_grant_item(1, "potion_hp")
+			game.use_item_slot(0)
+		elif _shot_stage == 8 and _test_timer > 6.8:
+			_shot_stage = 9
+			print("[TEST] tutorial: item done -> %s waypoint=%s PASS=%s" % [
+				tut.STEPS[tut.step], str(game.waypoint_node != null),
+				str(tut.STEPS[tut.step] == "talk" and game.waypoint_node != null)])
+			game.start_dialog(0) # финал: разговор со старейшиной
+		elif _shot_stage == 9 and _test_timer > 7.4:
+			_shot_stage = 10
+			var meta := ConfigFile.new()
+			meta.load(Save.meta_path())
+			var on_disk: bool = bool(meta.get_value("meta", "tutorial_done", false))
+			print("[TEST] tutorial: finished active=%s flag=%s disk=%s waypoint_cleared=%s PASS=%s" % [
+				str(tut.active), str(Save.tutorial_done), str(on_disk), str(game.waypoint_node == null),
+				str(not tut.active and Save.tutorial_done and on_disk and game.waypoint_node == null)])
+			print("[TEST] done, quitting. mode=tutorial")
+			get_tree().quit()
+		return
 
 	# стамина (D1): перекид тратит; пустая — блокирует перекид; покой восстанавливает
 	if _test_mode == "single" and not _test_stam_checked and _test_timer > 19.0 and game != null:

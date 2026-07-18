@@ -392,6 +392,13 @@ func _build_play_section(content: Control) -> Control:
 	box.add_child(_restart_campaign_cb)
 	_restart_campaign_cb.visible = Save.has_campaign()
 
+	# повторное обучение — по желанию (D2: «и за кнопкой в меню»)
+	var tut_cb := CheckBox.new()
+	tut_cb.text = tr("Показать обучение снова")
+	tut_cb.add_theme_font_size_override("font_size", 14)
+	box.add_child(tut_cb)
+	tut_cb.visible = Save.tutorial_done
+
 	_difficulty_row(box)
 	_biome_row(box)
 	box.add_child(main._title_label(tr("(в сюжете локации идут по главам)"), 12, Color(0.6, 0.62, 0.66)))
@@ -406,6 +413,8 @@ func _build_play_section(content: Control) -> Control:
 		var story: bool = smode_opt.selected == 0
 		if story and _restart_campaign_cb.button_pressed:
 			Save.reset_campaign()
+		if story and tut_cb.button_pressed:
+			Save.tutorial_done = false # только в памяти: завершение снова запишет флаг
 		Net.continue_campaign = Save.has_campaign()
 		Net.start_single("story" if story else "pve")
 		main.enter_game())

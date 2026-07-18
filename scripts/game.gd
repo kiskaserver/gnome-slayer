@@ -82,6 +82,8 @@ var loot: LootSystem
 var quest: QuestDirector
 var camp: CampBuilder
 var zones: ZoneManager
+var tutorial: Tutorial = null    # обучение (D2): только одиночная кампания, гл. 1
+var waypoint_node: Node3D = null # золотой маяк-указатель текущей цели
 const SECOND_WIND_HP_FRAC := 0.25
 var _second_wind_used: Dictionary = {}  # id игрока -> уже сработало в этом матче
 var nav_region: NavigationRegion3D = null
@@ -284,6 +286,9 @@ func _ready() -> void:
 
 	if is_story() and not is_dungeon():
 		_build_camp()
+		# обучение: первый запуск одиночной кампании, пока флаг не выставлен
+		if Net.mode == Net.Mode.SINGLE and Net.campaign_chapter == 1 and not Save.tutorial_done:
+			tutorial = Tutorial.new(self)
 
 	if Net.is_server:
 		# состояние, пронесённое сквозь смену зоны (золото, квест, чекпоинт)
@@ -1256,6 +1261,8 @@ func _update_npc_markers() -> void:
 
 ## Диалог с НПС (локально); по завершении — запрос серверу, если этап «поговорить».
 func start_dialog(npc_idx: int) -> void:
+	if tutorial != null:
+		tutorial.notify("talk", float(npc_idx))
 	var cfg := chapter_cfg()
 	var dialog_key := ""
 	var advance := ""
@@ -1556,6 +1563,52 @@ func on_chest_spawn(cid: int, x: float, z: float, rot: float) -> void:
 	node.add_child(body)
 	chests[cid] = {"node": node, "lid": lid, "opened": false, "x": x, "z": z}
 	fx_burst(Vector3(x, 0.6, z), Color(1.0, 0.85, 0.4), 10)
+
+
+## Золотой маяк-указатель: столб света и парящая стрелка над целью.
+## Пригодится не только обучению — любой сценарий может подсветить точку.
+func set_waypoint(pos: Vector3) -> void:
+	if waypoint_node == null:
+		waypoint_node = Node3D.new()
+		add_child(waypoint_node)
+		var beam := MeshInstance3D.new()
+		var bm := CylinderMesh.new()
+		bm.top_radius = 0.16
+		bm.bottom_radius = 0.34
+		bm.height = 7.0
+		bm.radial_segments = 8
+		beam.mesh = bm
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.albedo_color = Color(1.0, 0.85, 0.35, 0.35)
+		mat.emission_enabled = true
+		mat.emission = Color(1.0, 0.85, 0.35)
+		mat.emission_energy_multiplier = 1.2
+		beam.mesh.material = mat
+		beam.position.y = 3.5
+		waypoint_node.add_child(beam)
+		var arrow := MeshInstance3D.new()
+		var am := PrismMesh.new()
+		am.size = Vector3(0.7, 0.8, 0.7)
+		arrow.mesh = am
+		arrow.material_override = mat
+		arrow.rotation.z = PI # остриём вниз
+		arrow.position.y = 4.6
+		waypoint_node.add_child(arrow)
+		var wl := OmniLight3D.new()
+		wl.light_color = Color(1.0, 0.85, 0.4)
+		wl.light_energy = 1.0
+		wl.omni_range = 6.0
+		wl.position.y = 1.5
+		waypoint_node.add_child(wl)
+	waypoint_node.global_position = pos
+
+
+func clear_waypoint() -> void:
+	if waypoint_node != null and is_instance_valid(waypoint_node):
+		waypoint_node.queue_free()
+	waypoint_node = null
 
 
 ## Взрыв бочки (сервер): урон по площади обеим сторонам, цепная детонация.
@@ -1861,6 +1914,8 @@ func on_chest_opened(cid: int) -> void:
 	if c.is_empty():
 		return
 	c.opened = true
+	if tutorial != null:
+		tutorial.notify("chest")
 	if c.lid != null:
 		var t := create_tween()
 		t.tween_property(c.lid, "rotation:x", -1.9, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
@@ -1921,6 +1976,8 @@ func use_item_slot(idx: int) -> void:
 	var me = player_nodes.get(Net.my_id)
 	if me == null or me.state in ["dead", "downed"]:
 		return
+	if tutorial != null:
+		tutorial.notify("item")
 	var type: String = bar[idx].type
 	var dir := Vector3(sin(me.facing), 0, cos(me.facing))
 	Net.req_use_item(type, dir.x, dir.z)
@@ -2091,6 +2148,8 @@ func _physics_process(delta: float) -> void:
 	_update_bombs(delta)
 	loot.update_pickups(delta)
 	loot.update_item_drops(delta)
+	if tutorial != null:
+		tutorial.tick(delta)
 	# автосейв героя раз в 30 секунд
 	_hero_save_timer -= delta
 	if _hero_save_timer <= 0:

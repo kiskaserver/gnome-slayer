@@ -233,6 +233,15 @@ func local_sim(delta: float) -> void:
 		p.velocity.y = 0
 	p.model.rotation.y = p.facing
 
+	# обучение: зачёт движения/спринта/блока настоящими действиями
+	if p.game.tutorial != null:
+		if moving and speed_mul > 0:
+			p.game.tutorial.notify("move", (p.RUN_SPEED if running else p.WALK_SPEED) * delta)
+			if running:
+				p.game.tutorial.notify("sprint", delta)
+		if p.blocking:
+			p.game.tutorial.notify("block", delta)
+
 	# локомоция
 	if p.state == "idle":
 		if moving:

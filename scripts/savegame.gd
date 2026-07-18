@@ -20,6 +20,7 @@ static func meta_path() -> String:
 const OLD_PATH := "user://save.cfg"
 
 var active_slot := 1
+var tutorial_done := false  # meta-флаг: обучение показано один раз на профиль
 var hero := {"xp": 0, "level": 1, "points": 0, "str": 0, "vit": 0, "agi": 0, "luck": 0}
 var hero_skills: Dictionary = {}  # id -> true; отдельно от hero — там только int-поля
 var hero_inventory: Array = []    # предметы Items-формата (id/kind/rarity/aseed/count)
@@ -36,6 +37,7 @@ func _ready() -> void:
 	var meta := ConfigFile.new()
 	if meta.load(meta_path()) == OK:
 		active_slot = clampi(int(meta.get_value("meta", "active_slot", 1)), 1, SLOTS)
+		tutorial_done = bool(meta.get_value("meta", "tutorial_done", false))
 	load_slot(active_slot)
 
 
@@ -70,10 +72,20 @@ func slot_info(i: int) -> Dictionary:
 func select_slot(i: int) -> void:
 	active_slot = clampi(i, 1, SLOTS)
 	var meta := ConfigFile.new()
+	meta.load(meta_path()) # не потерять прочие meta-поля (tutorial_done)
 	meta.set_value("meta", "active_slot", active_slot)
 	meta.save(meta_path())
 	load_slot(active_slot)
 	slots_changed.emit()
+
+
+## Обучение пройдено (или пропущено) — больше не показываем.
+func set_tutorial_done() -> void:
+	tutorial_done = true
+	var meta := ConfigFile.new()
+	meta.load(meta_path())
+	meta.set_value("meta", "tutorial_done", true)
+	meta.save(meta_path())
 
 
 func delete_slot(i: int) -> void:
