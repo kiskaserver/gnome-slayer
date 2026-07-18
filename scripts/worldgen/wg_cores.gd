@@ -135,6 +135,145 @@ static func _core_approach(parent: Node3D, rng: RandomNumberGenerator, c: Vector
 		WgLib.place_prop(parent, "halloween/skull.gltf", Vector3(c.x + rng.randf_range(-6, 6), 0.02, c.z + rng.randf_range(-6, 6)), rng.randf_range(0, TAU), 1.0)
 
 
+## Табір ворога: кольцо черепов на кольях вокруг большого кострища и знамя —
+## гнездо, которое хочется выжечь. Домики-спавнеры добавляет оверворлд (их
+## здесь больше), мини-босса (элиту) спавнит сервер при старте главы.
+static func _core_enemy_camp(parent: Node3D, rng: RandomNumberGenerator, c: Vector3, obstacles: Array) -> void:
+	# большое кострище: кольцо камней и угли
+	for i in 6:
+		var a := TAU * float(i) / 6.0
+		WgLib._rock(parent, rng, c.x + cos(a) * 1.3, c.z + sin(a) * 1.3, rng.randf_range(0.35, 0.5), false)
+	var fire := GPUParticles3D.new()
+	fire.amount = 26
+	fire.lifetime = 0.8
+	var fm := ParticleProcessMaterial.new()
+	fm.direction = Vector3(0, 1, 0)
+	fm.spread = 18.0
+	fm.initial_velocity_min = 0.9
+	fm.initial_velocity_max = 2.0
+	fm.gravity = Vector3(0, 1.5, 0)
+	fm.scale_min = 0.5
+	fm.scale_max = 1.3
+	fm.color = Color(1.0, 0.45, 0.1)
+	fire.process_material = fm
+	var fdm := SphereMesh.new()
+	fdm.radius = 0.09
+	fdm.height = 0.18
+	fdm.radial_segments = 6
+	fdm.rings = 3
+	var fmat := StandardMaterial3D.new()
+	fmat.vertex_color_use_as_albedo = true
+	fmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fdm.material = fmat
+	fire.draw_pass_1 = fdm
+	fire.position = Vector3(c.x, 0.5, c.z)
+	parent.add_child(fire)
+	var light := OmniLight3D.new()
+	light.light_color = Color(1.0, 0.5, 0.15)
+	light.light_energy = 1.4
+	light.omni_range = 9.0
+	light.position = Vector3(c.x, 1.0, c.z)
+	parent.add_child(light)
+	WgLib._static_cylinder(parent, c.x, c.z, 1.5, 0.6)
+	obstacles.append({"x": c.x, "z": c.z, "r": 1.5})
+	# черепа на кольях по периметру лагеря
+	for i in 5:
+		var a2 := TAU * float(i) / 5.0 + rng.randf_range(-0.2, 0.2)
+		var r2 := rng.randf_range(5.0, 7.0)
+		var px := c.x + cos(a2) * r2
+		var pz := c.z + sin(a2) * r2
+		if not WgGeom._clear_of(obstacles, px, pz, 0.3, 0.4):
+			continue
+		var pole := MeshInstance3D.new()
+		var pm := CylinderMesh.new()
+		pm.top_radius = 0.05
+		pm.bottom_radius = 0.07
+		pm.height = 1.7
+		pole.mesh = pm
+		pole.material_override = WgLib._mat(Color(0.32, 0.24, 0.16), true)
+		pole.position = Vector3(px, 0.85, pz)
+		pole.rotation.z = rng.randf_range(-0.08, 0.08)
+		parent.add_child(pole)
+		WgLib.place_prop(parent, "halloween/skull.gltf", Vector3(px, 1.7, pz), rng.randf_range(0, TAU), 1.1)
+		obstacles.append({"x": px, "z": pz, "r": 0.3})
+	# знамя племени
+	WgLib.place_prop(parent, "dungeon/banner_thin_red.gltf.glb", c + Vector3(2.2, 0, 1.4), rng.randf_range(0, TAU), 1.15)
+
+
+## Застава: линия забора с открытыми воротами и сторожевые «башни»-колонны
+## со смолоскипами — узкое горло, у которого поджидает гарнизон.
+static func _core_outpost(parent: Node3D, rng: RandomNumberGenerator, c: Vector3, along_angle: float, obstacles: Array) -> void:
+	WgGeom._fence_gate_line(parent, rng, c, along_angle, 9.0, obstacles)
+	var across := along_angle + PI * 0.5
+	# сторожевые колонны по бокам ворот, чуть впереди линии
+	for side in [-1.0, 1.0]:
+		var tx: float = c.x + cos(across) * 4.6 * side + cos(along_angle) * 1.8
+		var tz: float = c.z + sin(across) * 4.6 * side + sin(along_angle) * 1.8
+		var col := WgLib.place_prop(parent, "dungeon/pillar_decorated.gltf.glb", Vector3(tx, 0, tz), rng.randf_range(0, TAU), 1.5)
+		for mi in col.find_children("*", "MeshInstance3D", true, false):
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		WgLib._static_cylinder(parent, tx, tz, 0.8, 4.0)
+		obstacles.append({"x": tx, "z": tz, "r": 0.8})
+		WgLib.place_prop(parent, "dungeon/torch_lit.gltf.glb", Vector3(tx + 0.9, 0, tz + 0.4), rng.randf_range(0, TAU), 1.1)
+	# ящики гарнизона у ворот
+	for _try in 12:
+		var bx: float = c.x + cos(along_angle) * rng.randf_range(2.5, 4.5) + cos(across) * rng.randf_range(-2.0, 2.0)
+		var bz: float = c.z + sin(along_angle) * rng.randf_range(2.5, 4.5) + sin(across) * rng.randf_range(-2.0, 2.0)
+		if WgGeom._clear_of(obstacles, bx, bz, 0.9, 0.6):
+			WgLib.place_prop(parent, "dungeon/crates_stacked.gltf.glb", Vector3(bx, 0, bz), rng.randf_range(0, TAU), 1.0)
+			WgLib._static_cylinder(parent, bx, bz, 0.8, 1.4)
+			obstacles.append({"x": bx, "z": bz, "r": 0.8})
+			break
+
+
+## Цвинтар: ряды могил за оградой, мёртвые деревья и одинокий фонарь —
+## самостоятельная область, а не пара надгробий у дороги.
+static func _core_cemetery(parent: Node3D, rng: RandomNumberGenerator, c: Vector3, obstacles: Array) -> void:
+	var row_a := rng.randf_range(0, TAU)
+	var rowv := Vector2(cos(row_a), sin(row_a))
+	var colv := Vector2(-rowv.y, rowv.x)
+	var graves := ["halloween/grave_A.gltf", "halloween/grave_B.gltf", "halloween/gravemarker_A.gltf"]
+	for row in 3:
+		for i in 4:
+			var off_r := (float(row) - 1.0) * 3.4
+			var off_i := (float(i) - 1.5) * 2.6
+			var gx: float = c.x + rowv.x * off_i + colv.x * off_r + rng.randf_range(-0.3, 0.3)
+			var gz: float = c.z + rowv.y * off_i + colv.y * off_r + rng.randf_range(-0.3, 0.3)
+			if not WgGeom._clear_of(obstacles, gx, gz, 0.5, 0.4):
+				continue
+			WgLib.place_prop(parent, graves[rng.randi() % graves.size()], Vector3(gx, 0, gz),
+				WgGeom._yaw_along(row_a) + rng.randf_range(-0.1, 0.1), rng.randf_range(0.95, 1.15))
+			WgLib._static_cylinder(parent, gx, gz, 0.4, 0.9)
+			obstacles.append({"x": gx, "z": gz, "r": 0.4})
+	# ограда с двух сторон рядов
+	for side in [-1.0, 1.0]:
+		for i in 3:
+			var off_i2 := (float(i) - 1.0) * 4.2
+			var fx: float = c.x + rowv.x * off_i2 + colv.x * 5.6 * side
+			var fz: float = c.z + rowv.y * off_i2 + colv.y * 5.6 * side
+			if not WgGeom._clear_of(obstacles, fx, fz, 1.3, 0.4):
+				continue
+			WgLib.place_prop(parent, "halloween/fence.gltf", Vector3(fx, 0, fz), WgGeom._yaw_along(row_a), 1.1)
+			WgLib._static_box(parent, fx, fz, WgGeom._yaw_along(row_a), 4.0, 1.2, 0.4)
+			obstacles.append({"x": fx, "z": fz, "r": 1.3})
+	# мёртвые деревья и фонарь смотрителя
+	for i in 2:
+		var a := rng.randf_range(0, TAU)
+		var r := rng.randf_range(7.0, 10.0)
+		var tx: float = c.x + cos(a) * r
+		var tz: float = c.z + sin(a) * r
+		if WgGeom._clear_of(obstacles, tx, tz, 0.8, 0.5):
+			WgLib.place_prop(parent, "halloween/tree_dead_large.gltf", Vector3(tx, 0, tz), rng.randf_range(0, TAU), rng.randf_range(1.2, 1.6), 0.6, 3.5)
+			obstacles.append({"x": tx, "z": tz, "r": 0.8})
+	var lp := WgLib.place_prop(parent, "halloween/lantern_standing.gltf", c + Vector3(rowv.x * 6.0, 0, rowv.y * 6.0), rng.randf_range(0, TAU), 1.2)
+	var ll := OmniLight3D.new()
+	ll.light_color = Color(0.6, 0.8, 0.6)
+	ll.light_energy = 0.7
+	ll.omni_range = 6.0
+	ll.position.y = 1.6
+	lp.add_child(ll)
+
+
 ## Тупички-кеши: от магистрали ответвляется короткая тропа к тайнику —
 ## монеты, бочка и тёплый отблеск. Позицию возвращаем: сервер поставит сундук.
 static func _road_caches(parent: Node3D, rng: RandomNumberGenerator, main_samples: Array, areas: Array, obstacles: Array) -> Array:

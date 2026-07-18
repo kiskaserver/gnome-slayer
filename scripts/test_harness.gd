@@ -19,6 +19,7 @@ var _screenshot_path := ""
 var _tod_override := -1.0
 var _test_paused := false
 var _pause_snapshot := {}
+var _start_chapter := 1 # --chapter=N: сюжетный прогон с главы N (компоновка поздних глав)
 
 var game: Game:
 	get:
@@ -40,6 +41,8 @@ func handle_cmdline() -> void:
 			Net.difficulty = arg.get_slice("=", 1)
 		elif arg.begins_with("--tod="):
 			_tod_override = float(arg.get_slice("=", 1))
+		elif arg.begins_with("--chapter="):
+			_start_chapter = clampi(int(arg.get_slice("=", 1)), 1, Quests.CHAPTERS.size())
 	if Net.debug_log:
 		# проверка переводов
 		var prev_locale := TranslationServer.get_locale()
@@ -57,6 +60,11 @@ func handle_cmdline() -> void:
 			main.enter_game()
 		elif arg == "--test-story":
 			_test_mode = "story"
+			if _start_chapter > 1:
+				# тестовые сейвы уже сброшены — пишем чистый слот с нужной главой
+				Save.chapter = _start_chapter
+				Save.write()
+				Net.continue_campaign = true
 			Net.start_single("story")
 			main.enter_game()
 		elif arg.begins_with("--screenshot="):
@@ -135,6 +143,76 @@ func _reset_test_saves() -> void:
 		DirAccess.remove_absolute(Save.meta_path())
 	Save.active_slot = 1
 	Save.load_slot(Save.active_slot)
+
+
+## Проверки генерации оверворлда (C3): компоновка, пересечения коллайдеров,
+## связность по навсетке и плотность областей. Ждёт запечки навигации.
+func _check_overworld_layout() -> void:
+	print("[TEST] overworld: areas=%d road=%d entrance=%s PASS=%s" % [
+		game.world_areas.size(), game.world_road.size(),
+		str(game.dungeon_entrance != Vector3.INF),
+		str(game.world_areas.size() >= 5 and game.world_road.size() >= 3 and game.dungeon_entrance != Vector3.INF)])
+	# крупные объекты (здания/дома/POI/крипта, r>=2) не должны пересекаться
+	# коллайдерами — это ловит «здание в здании»
+	var big: Array = []
+	for o in game.world_obstacles:
+		if float(o.get("r", 0.0)) >= 2.0:
+			big.append(o)
+	var overlaps := 0
+	for a in big.size():
+		for b2 in range(a + 1, big.size()):
+			var oa: Dictionary = big[a]
+			var ob: Dictionary = big[b2]
+			var d2: float = Vector2(oa.x - ob.x, oa.z - ob.z).length()
+			if d2 < oa.r + ob.r - 0.3: # пересечение коллайдеров
+				overlaps += 1
+	print("[TEST] overworld: %d big props, %d collider overlaps PASS=%s" % [
+		big.size(), overlaps, str(overlaps == 0)])
+	# связность — от лагеря по навсетке достижимы центры всех областей и вход
+	# в подземелье (иначе застройка перегородила путь). Запечка асинхронная.
+	var nav_wait := 0.0
+	while not game.nav_ready and nav_wait < 8.0:
+		await get_tree().create_timer(0.5).timeout
+		nav_wait += 0.5
+	await get_tree().physics_frame # серверу навигации нужен синк после запечки
+	await get_tree().physics_frame
+	# исходная точка — первый вейпоинт дороги за сейф-зоной: гарантированно
+	# основная плоскость навсетки, а не островок на крыше пропа
+	var map_rid: RID = game.get_world_3d().navigation_map
+	var road_p: Vector3 = game.world_road[1] if game.world_road.size() > 1 else Vector3.ZERO
+	var from_p: Vector3 = NavigationServer3D.map_get_closest_point(map_rid, road_p)
+	var unreachable: Array = []
+	for area in game.world_areas:
+		if area.kind == "camp":
+			continue # лагерь вырезан из навсетки сейф-зоной — старт и так тут
+		var to_p: Vector3 = area.center
+		var path := NavigationServer3D.map_get_path(map_rid, from_p, to_p, true)
+		if path.is_empty() or Vector2(path[path.size() - 1].x - to_p.x, path[path.size() - 1].z - to_p.z).length() > 7.0:
+			unreachable.append(area.id)
+	var dpath := NavigationServer3D.map_get_path(map_rid, from_p, game.dungeon_entrance, true)
+	var d_ok: bool = not dpath.is_empty() and Vector2(dpath[dpath.size() - 1].x - game.dungeon_entrance.x,
+		dpath[dpath.size() - 1].z - game.dungeon_entrance.z).length() < 7.0
+	print("[TEST] overworld: connectivity unreachable=%s entrance_path=%s PASS=%s" % [
+		str(unreachable), str(d_ok), str(unreachable.is_empty() and d_ok)])
+	# плотность — в каждой области (кроме лагеря) есть чем заняться:
+	# домики-спавнеры, точки интереса, сундуки
+	var sparse: Array = []
+	for area in game.world_areas:
+		if area.kind == "camp":
+			continue
+		var n_int := 0
+		for h in game.houses:
+			if h.get("area", "") == area.id:
+				n_int += 1
+		for poi in game.world_pois:
+			if Vector2(poi.x - area.center.x, poi.z - area.center.z).length() < area.radius:
+				n_int += 1
+		for c2 in game.chests.values():
+			if Vector2(c2.x - area.center.x, c2.z - area.center.z).length() < area.radius:
+				n_int += 1
+		if n_int < 2:
+			sparse.append("%s:%d" % [area.id, n_int])
+	print("[TEST] overworld: density sparse=%s PASS=%s" % [str(sparse), str(sparse.is_empty())])
 
 
 func tick(delta: float) -> void:
@@ -261,6 +339,18 @@ func tick(delta: float) -> void:
 			game.gnomes.values().filter(func(g): return g.corpse != null).size()])
 
 	# сюжетный тест: полный цикл главы через серверные вызовы
+	if _test_mode == "story" and game != null and Net.is_server and _start_chapter > 1:
+		# --chapter=N: скриптованный сюжет рассчитан на главу 1 — тут проверяем
+		# только генерацию мира поздней главы (компоновка, связность, плотность)
+		if _shot_stage == 0 and _test_timer > 5.0:
+			_shot_stage = 99
+			await _check_overworld_layout()
+			print("[TEST] done, quitting. mode=story chapter=%d" % _start_chapter)
+			get_tree().quit()
+		elif _test_timer > 40.0:
+			get_tree().quit() # страховка, если проверка не завершилась
+		return
+
 	if _test_mode == "story" and game != null and Net.is_server:
 		var me3: PlayerChar = game.player_nodes.get(Net.my_id)
 		if _shot_stage == 0 and _test_timer > 2.0:
@@ -358,13 +448,17 @@ func tick(delta: float) -> void:
 		elif _shot_stage == 7 and _test_timer > 20.5:
 			_shot_stage = 8
 			var me_lvl: int = Net.players[1].level
+			# ожидания относительны стартовой главы: прогон может начинаться
+			# с --chapter=N (проверка компоновки поздних глав)
+			var want_ch: int = _start_chapter + 1
+			var want_biome: String = Quests.CHAPTER_BIOMES[clampi(want_ch - 1, 0, Quests.CHAPTER_BIOMES.size() - 1)]
 			print("[TEST] story: now ch=%d biome=%s level=%d xp=%d npcs=%d PASS=%s" % [
 				Net.campaign_chapter, Net.biome, me_lvl, Net.players[1].xp,
-				game.npcs.size(), str(Net.campaign_chapter == 2 and Net.biome == "autumn" and me_lvl > 1)])
+				game.npcs.size(), str(Net.campaign_chapter == want_ch and Net.biome == want_biome and me_lvl > 1)])
 			# сейв: глава записана на диск
 			print("[TEST] save: chapter=%d sides_mask=%d hero_level=%d PASS=%s" % [
 				Save.chapter, Save.sides_mask, Save.hero.level,
-				str(Save.chapter == 2 and Save.hero.level == me_lvl)])
+				str(Save.chapter == want_ch and Save.hero.level == me_lvl)])
 			# характеристики: тратим очки (сравниваем с началом — тестовый сейв персистится)
 			var pts_before: int = Net.players[1].points
 			var str_before: int = Net.players[1].str
@@ -401,27 +495,8 @@ func tick(delta: float) -> void:
 						game.server_bounty_read(1, i)
 			print("[TEST] story: poi kinds=%s PASS=%s" % [str(poi_kinds_seen), str(not poi_kinds_seen.is_empty())])
 
-			# оверворлд: области, дорога, вход в подземелье, чекпоинт, поводок
-			print("[TEST] overworld: areas=%d road=%d entrance=%s PASS=%s" % [
-				game.world_areas.size(), game.world_road.size(),
-				str(game.dungeon_entrance != Vector3.INF),
-				str(game.world_areas.size() >= 5 and game.world_road.size() >= 3 and game.dungeon_entrance != Vector3.INF)])
-			# уровень-дизайн: крупные объекты (здания/дома/POI/крипта, r>=2) не
-			# должны пересекаться коллайдерами — это ловит «здание в здании»
-			var big: Array = []
-			for o in game.world_obstacles:
-				if float(o.get("r", 0.0)) >= 2.0:
-					big.append(o)
-			var overlaps := 0
-			for a in big.size():
-				for b2 in range(a + 1, big.size()):
-					var oa: Dictionary = big[a]
-					var ob: Dictionary = big[b2]
-					var d2: float = Vector2(oa.x - ob.x, oa.z - ob.z).length()
-					if d2 < oa.r + ob.r - 0.3: # пересечение коллайдеров
-						overlaps += 1
-			print("[TEST] overworld: %d big props, %d collider overlaps PASS=%s" % [
-				big.size(), overlaps, str(overlaps == 0)])
+			# оверворлд: компоновка/связность/плотность + чекпоинт и поводок ниже
+			await _check_overworld_layout()
 			var cp_ok := game.team_checkpoint != Vector2.INF
 			print("[TEST] overworld: checkpoint set=%s (campfire rest)" % str(cp_ok))
 			# поводок: у врага с домом далёкая цель игнорируется

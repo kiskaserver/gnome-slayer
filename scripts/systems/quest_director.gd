@@ -25,6 +25,11 @@ func server_story_begin() -> void:
 	for i in pop:
 		var types := [roles.melee, roles.melee, roles.fast, roles.caster]
 		game.server_spawn_gnome(types[i % types.size()])
+	# табір ворага (C1): у кострища ждёт мини-босс — элита уровнем выше
+	for area in game.world_areas:
+		if area.kind == "enemy_camp":
+			game.server_spawn_gnome_at(roles.melee,
+				area.center + Vector3(2.5, 0, 2.5), game.enemy_level() + 1, true)
 	# вернулись из подземелья с недобитым сайд-квестом на сбор — доложить объекты
 	if game._carry_restored and game.q_side == 1:
 		_respawn_side_qnodes()

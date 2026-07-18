@@ -26,15 +26,23 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 
 	# Стянутая карта-путешествие (C0): области ближе, перегоны короче —
 	# насыщенность вместо пустых полян между ориентирами.
+	# Пара средних областей зависит от биома (C1): главы отличаются
+	# компоновкой, а не только палитрой.
+	var mid_kinds: Array = {
+		"meadow": ["battlefield", "grove"],
+		"autumn": ["enemy_camp", "grove"],
+		"winter": ["outpost", "battlefield"],
+		"night": ["cemetery", "enemy_camp"],
+	}.get(biome_id, ["battlefield", "grove"])
 	var areas: Array = []
 	areas.append({"id": "camp", "kind": "camp", "center": Vector3(6, 0, 6), "radius": 20.0})
 	var settle_c: Vector3 = dirv * 38.0 + sidev * rng.randf_range(-6.0, 6.0)
 	areas.append({"id": "settlement", "kind": "settlement", "center": settle_c, "radius": 18.0})
 	var side_sign := 1.0 if rng.randf() < 0.5 else -1.0
 	var battle_c: Vector3 = dirv * 55.0 + sidev * (22.0 * side_sign)
-	areas.append({"id": "battlefield", "kind": "battlefield", "center": battle_c, "radius": 17.0})
+	areas.append({"id": mid_kinds[0], "kind": mid_kinds[0], "center": battle_c, "radius": 17.0})
 	var grove_c: Vector3 = dirv * 52.0 - sidev * (23.0 * side_sign)
-	areas.append({"id": "grove", "kind": "grove", "center": grove_c, "radius": 16.0})
+	areas.append({"id": mid_kinds[1], "kind": mid_kinds[1], "center": grove_c, "radius": 16.0})
 	var approach_c: Vector3 = dirv * 66.0
 	areas.append({"id": "approach", "kind": "approach", "center": approach_c, "radius": 14.0})
 
@@ -68,8 +76,18 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 
 	# --- ядра областей (C1): сгруппированные композиции вместо пустоты ---
 	WgCores._core_settlement(parent, rng, settle_c, road, obstacles)
-	WgCores._core_battlefield(parent, rng, battle_c, obstacles)
-	WgCores._core_grove(parent, rng, b, grove_c, obstacles)
+	for pair in [[mid_kinds[0], battle_c, fork], [mid_kinds[1], grove_c, fork]]:
+		var kind: String = pair[0]
+		var c: Vector3 = pair[1]
+		match kind:
+			"battlefield": WgCores._core_battlefield(parent, rng, c, obstacles)
+			"grove": WgCores._core_grove(parent, rng, b, c, obstacles)
+			"enemy_camp": WgCores._core_enemy_camp(parent, rng, c, obstacles)
+			"cemetery": WgCores._core_cemetery(parent, rng, c, obstacles)
+			"outpost":
+				# ворота заставы поперёк тропы от развилки к области
+				var fk: Vector3 = pair[2]
+				WgCores._core_outpost(parent, rng, c, atan2(c.z - fk.z, c.x - fk.x), obstacles)
 	WgCores._core_approach(parent, rng, approach_c, dirv, sidev, obstacles)
 
 	# --- ворота в открытых промежутках дороги (открытые створки) ---
@@ -79,7 +97,8 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 	for area in areas:
 		if area.kind in ["camp"]:
 			continue
-		var n_houses := 3 if area.kind != "approach" else 2
+		# табір ворога — гнездо спавнеров: домиков больше, чем в обычной области
+		var n_houses := 2 if area.kind == "approach" else (4 if area.kind == "enemy_camp" else 3)
 		for i in n_houses:
 			var placed := false
 			for _t in 30:
