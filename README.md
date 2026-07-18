@@ -1,8 +1,8 @@
-# Gnome Slayer (Гномобой)
+﻿# Gnome Slayer (Гномобой)
 
 A co-op 3D action game built with **Godot 4.7**: you are a knight facing hordes of surprisingly well-organized gnomes. Single-player and full multiplayer — PvE co-op and PvP — with **Windows ↔ Linux crossplay**, positional voice chat, and a 6-chapter story campaign with three endings.
 
-**Current version: 4.2.0** · [Play on itch.io](https://itch.io) (search "Gnome Slayer") · Assets: CC0 by [Kay Lousberg](https://kaylousberg.com)
+**Current version: 4.3.0** · [Play on itch.io](https://itch.io) (search "Gnome Slayer") · Assets: CC0 by [Kay Lousberg](https://kaylousberg.com)
 
 ![Meadow](promo/shot_meadow.png)
 
