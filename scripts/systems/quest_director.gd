@@ -130,7 +130,12 @@ func _spawn_qnode(kind: String, at := Vector3.INF) -> void:
 				var a := randf_range(0, TAU)
 				var r := randf_range(10.0, WorldGen.WORLD_RADIUS - 5.0)
 				pos = Vector3(cos(a) * r, 0, sin(a) * r)
-			if pos.distance_to(game.CAMP_POS) > game.SAFE_RADIUS + 2.0 and clear_of_houses(pos):
+			var off_road := true
+			for w in game.world_road_samples:
+				if Vector2(w.x - pos.x, w.z - pos.z).length() < 2.2:
+					off_road = false
+					break
+			if off_road and pos.distance_to(game.CAMP_POS) > game.SAFE_RADIUS + 2.0 and clear_of_houses(pos):
 				break
 	Net.bcast("rpc_qnode", [game.qnode_seq, kind, pos.x, pos.z])
 
@@ -258,16 +263,31 @@ func server_open_portal() -> void:
 	if game.portal_open:
 		return
 	game.portal_open = true
-	game.portal_pos = game.CAMP_POS + Vector3(0, 0, game.SAFE_RADIUS + 3.0) # запасной вариант, если не найдём место почище
-	for _try in 20:
+	game.portal_pos = game.CAMP_POS + Vector3(0, 0, game.SAFE_RADIUS + 4.0) # запасной вариант, если не найдём место почище
+	for _try in 80:
 		var away := Vector2(0, 1).rotated(randf_range(0, TAU))
-		var cand: Vector3 = game.CAMP_POS + Vector3(away.x, 0, away.y) * (game.SAFE_RADIUS + 3.0)
-		if clear_of_houses(cand):
+		var cand: Vector3 = game.CAMP_POS + Vector3(away.x, 0, away.y) * randf_range(game.SAFE_RADIUS + 3.5, game.SAFE_RADIUS + 9.0)
+		if _portal_spot_clear(cand):
 			game.portal_pos = cand
 			break
 	Net.bcast("rpc_portal_spawn", [game.portal_pos.x, game.portal_pos.z])
 	game.q_main = 5
 	bcast_quest()
+
+
+## Порталу нужен настоящий клиренс: арка с колоннами шириной ~5 м не должна
+## врастать ни в дома, ни в деревья, ни в тропу.
+func _portal_spot_clear(pos: Vector3) -> bool:
+	for house in game.houses:
+		if Vector2(house.x - pos.x, house.z - pos.z).length() < 7.0:
+			return false
+	for o in game.world_obstacles:
+		if Vector2(o.x - pos.x, o.z - pos.z).length() < float(o.get("r", 0.0)) + 3.0:
+			return false
+	for w in game.world_road_samples:
+		if Vector2(w.x - pos.x, w.z - pos.z).length() < 2.4:
+			return false
+	return true
 
 
 func server_chapter_complete() -> void:

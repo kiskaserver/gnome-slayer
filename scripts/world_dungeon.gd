@@ -160,60 +160,48 @@ static func build(parent: Node3D, zone_seed: int) -> Dictionary:
 	# ОРТОгонально касаться чужого пола (иначе второй открытый вход), а
 	# диагональные соседи безвредны — стены ставятся только по ортогонали. ---
 	var secret := {}
-	for _try in 320:
-		# сперва просторная пристройка 2x2; в тесноте катакомб — чулан 1x1
-		var sw := 2 if _try < 160 else 1
-		# хозяин — любая комната цепочки, кроме входа и зала босса
-		var host: Dictionary = rooms[rng.randi_range(1, maxi(1, rooms.size() - 2))]
-		var side := rng.randi_range(0, 3)
-		var sx: int = host.gx + (rng.randi_range(0, maxi(0, host.w - sw)) if side < 2 else (-sw - 1 if side == 2 else host.w + 1))
-		var sz: int = host.gz + (rng.randi_range(0, maxi(0, host.h - sw)) if side >= 2 else (-sw - 1 if side == 0 else host.h + 1))
-		if sx < 1 or sz < 1 or sx + sw > GRID - 1 or sz + sw > GRID - 1:
-			continue
-		var neck: Vector2i
-		var wall_dir: Vector2i
-		match side:
-			0: # север от комнаты
-				neck = Vector2i(sx + rng.randi_range(0, sw - 1), host.gz - 1)
-				wall_dir = Vector2i(0, 1)
-			1: # юг
-				neck = Vector2i(sx + rng.randi_range(0, sw - 1), host.gz + host.h)
-				wall_dir = Vector2i(0, -1)
-			2: # запад
-				neck = Vector2i(host.gx - 1, sz + rng.randi_range(0, sw - 1))
-				wall_dir = Vector2i(1, 0)
-			_: # восток
-				neck = Vector2i(host.gx + host.w, sz + rng.randi_range(0, sw - 1))
-				wall_dir = Vector2i(-1, 0)
+	var attach_list: Array = floor_cells.keys()
+	for _try in 400:
+		# сперва просторная пристройка 2x2; в тесноте — чулан 1x1. Цепляемся
+		# к ЛЮБОЙ ячейке пола (комната или коридор): в плотных катакомбах
+		# у стен комнат может просто не остаться свободного кармана.
+		var sw := 2 if _try < 200 else 1
+		var attach: Vector2i = attach_list[rng.randi_range(0, attach_list.size() - 1)]
+		var d: Vector2i = dirs4[rng.randi_range(0, 3)]
+		var neck: Vector2i = attach + d
+		var perp := Vector2i(absi(d.y), absi(d.x))
+		var shift: int = rng.randi_range(-(sw - 1), 0)
 		var own: Dictionary = {neck: true}
-		for cx in range(sx, sx + sw):
-			for cz in range(sz, sz + sw):
-				own[Vector2i(cx, cz)] = true
+		for i in sw:
+			for j in sw:
+				own[neck + d * (1 + i) + perp * (j + shift)] = true
 		var ok := true
 		for cc in own:
-			if floor_cells.has(cc):
+			if cc.x < 1 or cc.y < 1 or cc.x > GRID - 2 or cc.y > GRID - 2 or floor_cells.has(cc):
 				ok = false
 				break
-			for d in dirs4:
-				var nb: Vector2i = cc + d
+			for nd in dirs4:
+				var nb: Vector2i = cc + nd
 				if own.has(nb):
 					continue
-				if cc == neck and nb == neck + wall_dir:
-					continue # единственный разрешённый контакт: вход из комнаты
+				if cc == neck and nb == attach:
+					continue # единственный разрешённый контакт: вход из пола
 				if floor_cells.has(nb):
 					ok = false
 					break
 			if not ok:
 				break
-		if not ok or not floor_cells.has(neck + wall_dir):
+		if not ok:
 			continue
 		for cc in own:
 			floor_cells[cc] = true
-		# сама кладка: между перешейком и комнатой
+		# сама кладка: между перешейком и полом-хозяином
 		var np := _cell_pos(neck.x, neck.y)
-		var wpos := Vector3(np.x + wall_dir.x * CELL * 0.5, 0, np.z + wall_dir.y * CELL * 0.5)
-		var wrot := 0.0 if wall_dir.y != 0 else PI * 0.5
-		var s_center := _cell_pos(sx, sz) + Vector3(CELL * 0.5, 0, CELL * 0.5)
+		var wpos := Vector3(np.x - d.x * CELL * 0.5, 0, np.z - d.y * CELL * 0.5)
+		var wrot := 0.0 if d.y != 0 else PI * 0.5
+		var base: Vector2i = neck + d
+		var s_center := _cell_pos(base.x, base.y) \
+			+ Vector3(d.x + perp.x * shift, 0, d.y + perp.y * shift) * (CELL * 0.5 * (sw - 1))
 		secret = {"x": wpos.x, "z": wpos.z, "rot": wrot, "center": s_center, "cells": own}
 		break
 
@@ -388,10 +376,12 @@ static func build(parent: Node3D, zone_seed: int) -> Dictionary:
 			WorldGen._static_cylinder(parent, px, pz, 0.7, 1.6)
 			obstacles.append({"x": px, "z": pz, "r": 0.7})
 
-	# --- зал босса: знамёна, золото и ниша наград (выбор одного из двух) ---
+	# --- зал босса: знамёна, золото и ниша наград (выбор одного из двух).
+	# Центр зала держим пустым (r >= 3.2): там встаёт портал наружу — арка не
+	# должна врастать в реквизит ---
 	WorldGen.place_prop(parent, "dungeon/banner_patternA_red.gltf.glb", boss_room.center + Vector3(0, 0, -(boss_room.h * CELL * 0.5) + 0.8), 0.0, 1.0)
-	WorldGen.place_prop(parent, "dungeon/coin_stack_medium.gltf.glb", boss_room.center + Vector3(1.8, 0, 1.2), rng.randf_range(0, TAU), 1.2)
-	WorldGen.place_prop(parent, "dungeon/trunk_large_A.gltf.glb", boss_room.center + Vector3(-2.0, 0, 1.5), rng.randf_range(0, TAU), 1.1)
+	WorldGen.place_prop(parent, "dungeon/coin_stack_medium.gltf.glb", boss_room.center + Vector3(3.4, 0, 2.2), rng.randf_range(0, TAU), 1.2)
+	WorldGen.place_prop(parent, "dungeon/trunk_large_A.gltf.glb", boss_room.center + Vector3(-3.5, 0, 2.4), rng.randf_range(0, TAU), 1.1)
 	var reward_spots: Array = [
 		boss_room.center + Vector3(-1.6, 0, -(boss_room.h * CELL * 0.5) + 1.8),
 		boss_room.center + Vector3(1.6, 0, -(boss_room.h * CELL * 0.5) + 1.8),

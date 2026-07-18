@@ -56,6 +56,7 @@ var world_caches: Array = []         # тайники у тупичков дор
 var barrels: Dictionary = {}         # взрывные бочки: bid -> {x, z, node, alive}
 var world_areas: Array = []          # оверворлд: [{id, kind, center, radius}]
 var world_road: Array = []           # вейпоинты главной дороги
+var world_road_samples: Array = []   # ВСЕ сэмплы троп (для «не ставить на тропе»)
 var dungeon_entrance := Vector3.INF  # точка входа в подземелье
 var team_checkpoint := Vector2.INF   # чекпоинт отряда (костёр у дороги)
 var boss_spot := Vector3.INF         # зал босса (в подземелье)
@@ -237,6 +238,7 @@ func _ready() -> void:
 	world_pois = data.get("pois", [])
 	world_areas = data.get("areas", [])
 	world_road = data.get("road", [])
+	world_road_samples = data.get("road_samples", [])
 	dungeon_entrance = data.get("dungeon_entrance", Vector3.INF)
 	world_caches = data.get("caches", [])
 	# бочки детерминированы сидом на всех машинах — bid совпадают без синка
@@ -955,10 +957,13 @@ func _update_fireballs(delta: float) -> void:
 	for fid in fireballs.keys():
 		var fb: Dictionary = fireballs[fid]
 		fb.life += delta
+		var prev: Vector3 = fb.node.global_position
 		fb.node.global_position += fb.dir * 11.0 * delta
 		if not Net.is_server:
 			continue
-		var boom: bool = fb.life > 3.0 or fb.node.global_position.y < 0.05
+		# снаряд не пролетает сквозь стены/деревья: сегмент кадра трассируется
+		var boom: bool = fb.life > 3.0 or fb.node.global_position.y < 0.05 \
+			or wall_between(prev, fb.node.global_position)
 		if fb.get("friendly", false):
 			# снаряд наёмника бьёт по гномам
 			for g in gnomes.values():
@@ -1106,6 +1111,22 @@ func on_portal_spawn(x: float, z: float) -> void:
 	portal_node = Node3D.new()
 	add_child(portal_node)
 	portal_node.global_position = Vector3(x, 0, z)
+
+	# каменный подиум под ногами: портал СТОИТ на площадке, а не парит в траве
+	var dais := MeshInstance3D.new()
+	var dm := CylinderMesh.new()
+	dm.top_radius = 3.0
+	dm.bottom_radius = 3.3
+	dm.height = 0.25
+	dm.radial_segments = 14
+	dais.mesh = dm
+	dais.material_override = WorldGen._mat(Color(0.5, 0.49, 0.47), true)
+	dais.position.y = 0.12
+	portal_node.add_child(dais)
+	for tside in [-1.0, 1.0]:
+		var t_ := WorldGen.prop_scene("dungeon/torch_lit.gltf.glb").instantiate()
+		portal_node.add_child(t_)
+		t_.position = Vector3(tside * 2.9, 0.2, -0.6)
 
 	# каменная арка вместо голого кольца — портал стоит в настоящем дверном
 	# проёме, а не левитирует посреди поляны
@@ -1565,6 +1586,24 @@ func on_chest_spawn(cid: int, x: float, z: float, rot: float) -> void:
 	fx_burst(Vector3(x, 0.6, z), Color(1.0, 0.85, 0.4), 10)
 
 
+## Есть ли стена/препятствие (слой 1) между двумя точками — на высоте груди,
+## чтобы луч не цеплял пол. Общая проверка LOS для снарядов и зрения ИИ.
+func wall_between(a: Vector3, b: Vector3) -> bool:
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(
+		Vector3(a.x, 1.1, a.z), Vector3(b.x, 1.1, b.z), 1)
+	return not space.intersect_ray(q).is_empty()
+
+
+## Первая точка удара луча о мир (слой 1) или Vector3.INF, если путь чист.
+func wall_hit(a: Vector3, b: Vector3) -> Vector3:
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(
+		Vector3(a.x, 1.1, a.z), Vector3(b.x, 1.1, b.z), 1)
+	var hit := space.intersect_ray(q)
+	return hit.position if not hit.is_empty() else Vector3.INF
+
+
 ## Золотой маяк-указатель: столб света и парящая стрелка над целью.
 ## Пригодится не только обучению — любой сценарий может подсветить точку.
 func set_waypoint(pos: Vector3) -> void:
@@ -1814,29 +1853,53 @@ func server_shoot(sender: int, dx: float, dz: float) -> void:
 		return
 	dir = dir.normalized()
 	var from := Vector2(sn.global_position.x, sn.global_position.z)
-	# ближайший враг в узком коридоре вдоль луча
-	var best_t := Items.RANGED_RANGE + 1.0
+	# стены обрезают луч: болт втыкается в препятствие, а не пролетает сквозь
+	var wall_t := Items.RANGED_RANGE
+	var wpoint := wall_hit(sn.global_position,
+		Vector3(from.x + dir.x * Items.RANGED_RANGE, 0, from.y + dir.y * Items.RANGED_RANGE))
+	if wpoint != Vector3.INF:
+		wall_t = maxf(0.1, (Vector2(wpoint.x, wpoint.z) - from).dot(dir))
+	# ближайший враг в узком коридоре вдоль луча (не дальше стены)
+	var best_t := wall_t + 1.0
 	var hit = null
 	for g in gnomes.values():
 		if not g.alive or g.friendly:
 			continue
 		var rel := Vector2(g.global_position.x, g.global_position.z) - from
 		var t := rel.dot(dir)
-		if t < 0.5 or t > Items.RANGED_RANGE:
+		if t < 0.5 or t > wall_t:
 			continue
 		if (rel - dir * t).length() > 0.9 and (rel - dir * t).length() > 0.35 * g.cfg.scale * 3.0:
 			continue
 		if t < best_t:
 			best_t = t
 			hit = g
+	# взрывная бочка на пути перехватывает болт раньше гнома
+	var barrel_bid := 0
+	for bid in barrels:
+		var b: Dictionary = barrels[bid]
+		if not b.alive:
+			continue
+		var relb := Vector2(b.x, b.z) - from
+		var tb := relb.dot(dir)
+		if tb < 0.5 or tb > wall_t:
+			continue
+		if (relb - dir * tb).length() > 0.8:
+			continue
+		if tb < best_t:
+			best_t = tb
+			hit = null
+			barrel_bid = bid
 	var pd: Dictionary = Net.players.get(sender, {})
 	var crit := randf() < Quests.crit_chance_for(pd) + Items.equip_crit_bonus(eq)
 	var dmg_f := Items.RANGED_BASE_DMG * Quests.dmg_mult_for(pd) * Items.equip_dmg_mult(eq)
 	var dmg := roundi(dmg_f * (1.8 * Quests.crit_dmg_mult_for(pd) if crit else 1.0))
-	var end_t: float = best_t if hit != null else Items.RANGED_RANGE
+	var end_t: float = best_t if (hit != null or barrel_bid != 0) else wall_t
 	var to := from + dir * end_t
 	Net.bcast("rpc_bolt_fx", [from.x, from.y, to.x, to.y])
-	if hit != null:
+	if barrel_bid != 0:
+		server_explode_barrel(barrel_bid, sender)
+	elif hit != null:
 		hit.last_attacker = sender
 		hit.last_attacker_gid = 0
 		hit.server_take_damage(dmg, sn.global_position, crit)

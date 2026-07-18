@@ -462,7 +462,10 @@ func can_see_target() -> bool:
 		return true
 	if d > float(gn.game.diff().sight):
 		return false
-	return absf(angle_difference(angle_to_target(), gn.facing)) < gn.SIGHT_ANGLE
+	if absf(angle_difference(angle_to_target(), gn.facing)) >= gn.SIGHT_ANGLE:
+		return false
+	# сквозь стены и стволы не видно — честная линия зрения
+	return not gn.game.wall_between(gn.global_position, gn.target.global_position)
 
 
 func can_hear_target() -> bool:

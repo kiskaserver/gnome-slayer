@@ -39,6 +39,11 @@ func place_chests(count: int) -> void:
 			x = cos(a) * r
 			z = sin(a) * r
 		var ok := true
+		# сундук не должен стоять на тропе — дорога остаётся дорогой
+		for w in game.world_road_samples:
+			if Vector2(w.x - x, w.z - z).length() < 2.5:
+				ok = false
+				break
 		for h in game.houses:
 			if Vector2(h.x - x, h.z - z).length() < 5.0:
 				ok = false

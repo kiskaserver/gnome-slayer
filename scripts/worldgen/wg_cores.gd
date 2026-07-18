@@ -51,7 +51,7 @@ static func _core_settlement(parent: Node3D, rng: RandomNumberGenerator, c: Vect
 
 ## Поле боя: линия сломанных заборов, воткнутые и поваленные клинки, черепа —
 ## место недавней стычки, а не пустое поле с одним знаменем.
-static func _core_battlefield(parent: Node3D, rng: RandomNumberGenerator, c: Vector3, obstacles: Array) -> void:
+static func _core_battlefield(parent: Node3D, rng: RandomNumberGenerator, c: Vector3, road: Array, obstacles: Array) -> void:
 	var line_a := rng.randf_range(0, TAU)
 	var across := Vector2(cos(line_a), sin(line_a))
 	# рваная линия обороны из сломанных заборов
@@ -59,7 +59,7 @@ static func _core_battlefield(parent: Node3D, rng: RandomNumberGenerator, c: Vec
 		var off := (float(i) - 1.5) * 4.2
 		var fx := c.x + across.x * off + rng.randf_range(-0.8, 0.8)
 		var fz := c.z + across.y * off + rng.randf_range(-0.8, 0.8)
-		if not WgGeom._clear_of(obstacles, fx, fz, 1.4, 0.6):
+		if not WgGeom._clear_of(obstacles, fx, fz, 1.4, 0.6) or WgGeom._road_dist(road, fx, fz) < 2.4:
 			continue
 		var yaw := WgGeom._yaw_along(line_a) + rng.randf_range(-0.2, 0.2)
 		WgLib.place_prop(parent, "halloween/fence_broken.gltf", Vector3(fx, 0, fz), yaw, 1.1)
@@ -109,14 +109,14 @@ static func _core_grove(parent: Node3D, rng: RandomNumberGenerator, b: Dictionar
 
 ## Подход к склепу: погост — могилы и надгробья вдоль последнего перегона,
 ## мёртвые деревья и черепа. Настроение меняется до входа в подземелье.
-static func _core_approach(parent: Node3D, rng: RandomNumberGenerator, c: Vector3, dirv: Vector3, sidev: Vector3, obstacles: Array) -> void:
+static func _core_approach(parent: Node3D, rng: RandomNumberGenerator, c: Vector3, dirv: Vector3, sidev: Vector3, road: Array, obstacles: Array) -> void:
 	var graves := ["halloween/grave_A.gltf", "halloween/grave_B.gltf", "halloween/gravemarker_A.gltf"]
 	for i in 7:
 		var along := rng.randf_range(-9.0, 3.0)
 		var side := (1.0 if i % 2 == 0 else -1.0) * rng.randf_range(3.2, 8.0)
 		var gx := c.x + dirv.x * along + sidev.x * side
 		var gz := c.z + dirv.z * along + sidev.z * side
-		if not WgGeom._clear_of(obstacles, gx, gz, 0.6, 0.5):
+		if not WgGeom._clear_of(obstacles, gx, gz, 0.6, 0.5) or WgGeom._road_dist(road, gx, gz) < 2.2:
 			continue
 		# лицом к дороге
 		var yaw := atan2(-sidev.x * signf(side), -sidev.z * signf(side)) + rng.randf_range(-0.15, 0.15)
@@ -138,7 +138,7 @@ static func _core_approach(parent: Node3D, rng: RandomNumberGenerator, c: Vector
 ## Табір ворога: кольцо черепов на кольях вокруг большого кострища и знамя —
 ## гнездо, которое хочется выжечь. Домики-спавнеры добавляет оверворлд (их
 ## здесь больше), мини-босса (элиту) спавнит сервер при старте главы.
-static func _core_enemy_camp(parent: Node3D, rng: RandomNumberGenerator, c: Vector3, obstacles: Array) -> void:
+static func _core_enemy_camp(parent: Node3D, rng: RandomNumberGenerator, c: Vector3, road: Array, obstacles: Array) -> void:
 	# большое кострище: кольцо камней и угли
 	for i in 6:
 		var a := TAU * float(i) / 6.0
@@ -182,7 +182,7 @@ static func _core_enemy_camp(parent: Node3D, rng: RandomNumberGenerator, c: Vect
 		var r2 := rng.randf_range(5.0, 7.0)
 		var px := c.x + cos(a2) * r2
 		var pz := c.z + sin(a2) * r2
-		if not WgGeom._clear_of(obstacles, px, pz, 0.3, 0.4):
+		if not WgGeom._clear_of(obstacles, px, pz, 0.3, 0.4) or WgGeom._road_dist(road, px, pz) < 2.0:
 			continue
 		var pole := MeshInstance3D.new()
 		var pm := CylinderMesh.new()
@@ -202,8 +202,13 @@ static func _core_enemy_camp(parent: Node3D, rng: RandomNumberGenerator, c: Vect
 
 ## Застава: линия забора с открытыми воротами и сторожевые «башни»-колонны
 ## со смолоскипами — узкое горло, у которого поджидает гарнизон.
-static func _core_outpost(parent: Node3D, rng: RandomNumberGenerator, c: Vector3, along_angle: float, obstacles: Array) -> void:
-	WgGeom._fence_gate_line(parent, rng, c, along_angle, 9.0, obstacles)
+static func _core_outpost(parent: Node3D, rng: RandomNumberGenerator, c: Vector3, along_angle: float, road: Array, obstacles: Array) -> void:
+	# свой проём ворот — вырезаем ближние сэмплы из проверки, дальше тропы неприкосновенны
+	var road_check: Array = []
+	for w in road:
+		if Vector2(w.x - c.x, w.z - c.z).length() > 4.0:
+			road_check.append(w)
+	WgGeom._fence_gate_line(parent, rng, c, along_angle, 9.0, obstacles, road_check)
 	var across := along_angle + PI * 0.5
 	# сторожевые колонны по бокам ворот, чуть впереди линии
 	for side in [-1.0, 1.0]:
@@ -228,7 +233,7 @@ static func _core_outpost(parent: Node3D, rng: RandomNumberGenerator, c: Vector3
 
 ## Цвинтар: ряды могил за оградой, мёртвые деревья и одинокий фонарь —
 ## самостоятельная область, а не пара надгробий у дороги.
-static func _core_cemetery(parent: Node3D, rng: RandomNumberGenerator, c: Vector3, obstacles: Array) -> void:
+static func _core_cemetery(parent: Node3D, rng: RandomNumberGenerator, c: Vector3, road: Array, obstacles: Array) -> void:
 	var row_a := rng.randf_range(0, TAU)
 	var rowv := Vector2(cos(row_a), sin(row_a))
 	var colv := Vector2(-rowv.y, rowv.x)
@@ -239,7 +244,7 @@ static func _core_cemetery(parent: Node3D, rng: RandomNumberGenerator, c: Vector
 			var off_i := (float(i) - 1.5) * 2.6
 			var gx: float = c.x + rowv.x * off_i + colv.x * off_r + rng.randf_range(-0.3, 0.3)
 			var gz: float = c.z + rowv.y * off_i + colv.y * off_r + rng.randf_range(-0.3, 0.3)
-			if not WgGeom._clear_of(obstacles, gx, gz, 0.5, 0.4):
+			if not WgGeom._clear_of(obstacles, gx, gz, 0.5, 0.4) or WgGeom._road_dist(road, gx, gz) < 2.2:
 				continue
 			WgLib.place_prop(parent, graves[rng.randi() % graves.size()], Vector3(gx, 0, gz),
 				WgGeom._yaw_along(row_a) + rng.randf_range(-0.1, 0.1), rng.randf_range(0.95, 1.15))
@@ -251,7 +256,7 @@ static func _core_cemetery(parent: Node3D, rng: RandomNumberGenerator, c: Vector
 			var off_i2 := (float(i) - 1.0) * 4.2
 			var fx: float = c.x + rowv.x * off_i2 + colv.x * 5.6 * side
 			var fz: float = c.z + rowv.y * off_i2 + colv.y * 5.6 * side
-			if not WgGeom._clear_of(obstacles, fx, fz, 1.3, 0.4):
+			if not WgGeom._clear_of(obstacles, fx, fz, 1.3, 0.4) or WgGeom._road_dist(road, fx, fz) < 2.4:
 				continue
 			WgLib.place_prop(parent, "halloween/fence.gltf", Vector3(fx, 0, fz), WgGeom._yaw_along(row_a), 1.1)
 			WgLib._static_box(parent, fx, fz, WgGeom._yaw_along(row_a), 4.0, 1.2, 0.4)

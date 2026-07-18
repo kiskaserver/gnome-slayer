@@ -83,8 +83,10 @@ static func _open_gate(gate: Node3D) -> void:
 
 ## Линия забора поперёк дороги с открытыми воротами над самой дорогой.
 ## dir_angle — направление движения по дороге; забор ставится перпендикулярно,
-## оставляя в центре проём под ширину дороги.
-static func _fence_gate_line(parent: Node3D, rng: RandomNumberGenerator, gate_pos: Vector3, dir_angle: float, half_len: float, obstacles: Array) -> void:
+## оставляя в центре проём под ширину дороги. Секция, попадающая на ЛЮБУЮ
+## тропу (магистраль изгибается, рядом ветки), пропускается — забор не должен
+## перегораживать дорогу нигде, кроме своего проёма.
+static func _fence_gate_line(parent: Node3D, rng: RandomNumberGenerator, gate_pos: Vector3, dir_angle: float, half_len: float, obstacles: Array, road: Array = []) -> void:
 	var across := dir_angle + PI * 0.5
 	var yaw := _yaw_along(across)
 	var gate := WgLib.place_prop(parent, "halloween/arch_gate.gltf", gate_pos, yaw, 1.35)
@@ -102,13 +104,16 @@ static func _fence_gate_line(parent: Node3D, rng: RandomNumberGenerator, gate_po
 			var off: float = (gap + (i - 0.5) * seg) * side
 			var fx: float = gate_pos.x + cos(across) * off
 			var fz: float = gate_pos.z + sin(across) * off
+			if not road.is_empty() and _road_dist(road, fx, fz) < 2.4:
+				continue # секция легла бы на тропу
 			WgLib.place_prop(parent, fences[rng.randi() % fences.size()], Vector3(fx, 0, fz), yaw, 1.1)
 			WgLib._static_box(parent, fx, fz, yaw, flen, 2.0, 0.4)
 			obstacles.append({"x": fx, "z": fz, "r": 1.6})
 
 
 ## Ворота вдоль дороги в открытых промежутках между областями (макс. 2).
-static func _place_gates(parent: Node3D, rng: RandomNumberGenerator, samples: Array, areas: Array, obstacles: Array) -> void:
+## full_road — ВСЕ сэмплы (с ветками): секции забора не ложатся на тропы.
+static func _place_gates(parent: Node3D, rng: RandomNumberGenerator, samples: Array, areas: Array, obstacles: Array, full_road: Array = []) -> void:
 	var placed := 0
 	var last_i := -100
 	var i := 8
@@ -122,7 +127,13 @@ static func _place_gates(parent: Node3D, rng: RandomNumberGenerator, samples: Ar
 		if tan.length() < 0.01:
 			i += 1
 			continue
-		_fence_gate_line(parent, rng, Vector3(p.x, 0, p.z), atan2(tan.z, tan.x), 11.0, obstacles)
+		# у ворот тропа — только собственный проём: чтобы изгиб магистрали не
+		# попал под секции, из проверочного списка вырезаем ближайшие сэмплы
+		var road_check: Array = []
+		for w in (full_road if not full_road.is_empty() else samples):
+			if Vector2(w.x - p.x, w.z - p.z).length() > 4.0:
+				road_check.append(w)
+		_fence_gate_line(parent, rng, Vector3(p.x, 0, p.z), atan2(tan.z, tan.x), 11.0, obstacles, road_check)
 		placed += 1
 		last_i = i
 		i += 1
@@ -208,7 +219,7 @@ static func _forest_belt(parent: Node3D, rng: RandomNumberGenerator, b: Dictiona
 			continue # просека вдоль дороги
 		if _in_area(areas, x, z, 2.0):
 			continue # внутри областей лес не сеем
-		var with_coll := (i % 2 == 0) # коллизия через одно дерево: навмеш легче, лес всё равно труднопроходим
-		WgLib._tree(parent, rng, b, x, z, rng.randf_range(1.0, 1.7), with_coll, false)
-		if with_coll:
-			obstacles.append({"x": x, "z": z, "r": 0.7})
+		# лес вдвое реже прежнего — коллизия у КАЖДОГО дерева по карману:
+		# сквозь стволы больше никто не проходит (ни гномы, ни герои)
+		WgLib._tree(parent, rng, b, x, z, rng.randf_range(1.0, 1.7), true, false)
+		obstacles.append({"x": x, "z": z, "r": 0.7})

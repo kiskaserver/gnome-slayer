@@ -80,18 +80,18 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 		var kind: String = pair[0]
 		var c: Vector3 = pair[1]
 		match kind:
-			"battlefield": WgCores._core_battlefield(parent, rng, c, obstacles)
+			"battlefield": WgCores._core_battlefield(parent, rng, c, road, obstacles)
 			"grove": WgCores._core_grove(parent, rng, b, c, obstacles)
-			"enemy_camp": WgCores._core_enemy_camp(parent, rng, c, obstacles)
-			"cemetery": WgCores._core_cemetery(parent, rng, c, obstacles)
+			"enemy_camp": WgCores._core_enemy_camp(parent, rng, c, road, obstacles)
+			"cemetery": WgCores._core_cemetery(parent, rng, c, road, obstacles)
 			"outpost":
 				# ворота заставы поперёк тропы от развилки к области
 				var fk: Vector3 = pair[2]
-				WgCores._core_outpost(parent, rng, c, atan2(c.z - fk.z, c.x - fk.x), obstacles)
-	WgCores._core_approach(parent, rng, approach_c, dirv, sidev, obstacles)
+				WgCores._core_outpost(parent, rng, c, atan2(c.z - fk.z, c.x - fk.x), road, obstacles)
+	WgCores._core_approach(parent, rng, approach_c, dirv, sidev, road, obstacles)
 
 	# --- ворота в открытых промежутках дороги (открытые створки) ---
-	WgGeom._place_gates(parent, rng, main_samples, areas, obstacles)
+	WgGeom._place_gates(parent, rng, main_samples, areas, obstacles, road)
 
 	# --- домики гномов по областям (спавны врагов) — обходят всё вышестоящее ---
 	for area in areas:
@@ -222,5 +222,6 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 	return {"spawn_points": spawn_points, "houses": houses, "nav_region": region,
 		"sun": envd.sun, "moon": envd.moon, "env": envd.env, "sky_mat": envd.sky_mat,
 		"biome": b, "obstacles": obstacles, "pois": pois,
-		"areas": areas, "road": road_pts, "dungeon_entrance": dungeon_entrance,
+		"areas": areas, "road": road_pts, "road_samples": road,
+		"dungeon_entrance": dungeon_entrance,
 		"caches": caches, "barrels": barrels}
