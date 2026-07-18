@@ -25,6 +25,12 @@ func server_story_begin() -> void:
 	for i in pop:
 		var types := [roles.melee, roles.melee, roles.fast, roles.caster]
 		game.server_spawn_gnome(types[i % types.size()])
+	# происхождение-дезертир приносит отряду стартовое золото (гл. 1)
+	if not game._carry_restored and Net.campaign_chapter == 1 and Net.mode != Net.Mode.CLIENT:
+		var og: int = int(Quests.ORIGINS.get(Save.hero_origin, {}).get("gold", 0))
+		if og > 0:
+			game.server_gold += og
+			Net.bcast("rpc_gold", [game.server_gold])
 	# табір ворага (C1): у кострища ждёт мини-босс — элита уровнем выше
 	for area in game.world_areas:
 		if area.kind == "enemy_camp":
@@ -61,7 +67,14 @@ func server_dungeon_begin() -> void:
 	if game.q_main == 2:
 		game.boss_gid = game.gnome_seq + 1
 		game.server_spawn_gnome_at(roles.boss, game.boss_spot, game.enemy_level())
-		Net.bcast("rpc_banner", ["ХРАНИТЕЛЬ ОСКОЛКА ЗДЕСЬ"])
+		# «Осколки смысла»: хранитель произносит тезис своей школы,
+		# затем игра ждёт ответа — Сталь или Слово (доктрина)
+		var si: int = clampi(Net.campaign_chapter - 1, 0, Quests.SCHOOLS.size() - 1)
+		var school: Dictionary = Quests.SCHOOLS[si]
+		Net.bcast("rpc_banner", [school.name])
+		for line in school.thesis:
+			Net.bcast("rpc_sys", ["%s||%s" % [school.keeper, line]])
+		Net.bcast("rpc_doctrine_open", [])
 
 
 ## Доспавнить недостающие объекты сайд-квеста после возврата из подземелья.
@@ -184,6 +197,31 @@ func clear_of_houses(pos: Vector3) -> bool:
 	return true
 
 
+## Ответ хранителю (5.0): Сталь — +20% опыта за босса; Слово — хранитель
+## сомневается (−15% здоровья). Счёт доктрины живёт всю кампанию.
+func server_doctrine(sender: int, steel: bool) -> void:
+	if not game.is_dungeon() or game.match_over:
+		return
+	# двойной ответ не считается: окно одно на данж
+	if game.get_meta("doctrine_done", false):
+		return
+	game.set_meta("doctrine_done", true)
+	game.set_meta("doctrine_steel_choice", steel)
+	if steel:
+		Net.doctrine_steel += 1
+	else:
+		Net.doctrine_word += 1
+		var boss = game.gnomes.get(game.boss_gid)
+		if boss != null and boss.alive:
+			boss.max_hp = roundi(boss.max_hp * 0.85)
+			boss.hp = mini(boss.hp, boss.max_hp)
+	if Net.mode != Net.Mode.CLIENT:
+		Save.doctrine_steel = Net.doctrine_steel
+		Save.doctrine_word = Net.doctrine_word
+		Save.write()
+	Net.bcast("rpc_doctrine_result", [steel, sender])
+
+
 func server_qnode_take(sender: int, id: int) -> void:
 	if not game.is_story() or game.match_over:
 		return
@@ -240,6 +278,9 @@ func on_gnome_died(g) -> void:
 		game.q_main = 3
 		_spawn_qnode("shard", g.global_position)
 		bcast_quest()
+		# Сталь окупается: налог на болтовню не плачен — +20% опыта за хранителя
+		if game.get_meta("doctrine_done", false) and game.get_meta("doctrine_steel_choice", false):
+			game.server_grant_xp_all(roundi(Quests.XP_CHAPTER_REWARD * 0.2))
 		# ниша наград (M5): пара трофеев — взял один, второй рассыплется
 		if not game.dungeon_reward_spots.is_empty() and game.reward_pair.is_empty():
 			for spot in game.dungeon_reward_spots:
@@ -297,6 +338,8 @@ func server_chapter_complete() -> void:
 	var outro: Array = Quests.CHAPTER_OUTRO[Net.campaign_chapter - 1] if Net.campaign_chapter - 1 < Quests.CHAPTER_OUTRO.size() else []
 	Net.bcast("rpc_cutscene", [outro, game.portal_pos.x, game.portal_pos.y, game.portal_pos.z])
 	if Net.campaign_chapter >= Quests.CHAPTERS.size():
+		# вердикт Летописца: кем пройден поход — Мечом или Мыслью
+		Net.bcast("rpc_sys", [Chronicler.verdict_key(Net.doctrine_steel, Net.doctrine_word)])
 		# концовка зависит от выполненных сайд-квестов за кампанию
 		var done := 0
 		for i in Quests.CHAPTERS.size():

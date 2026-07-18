@@ -319,6 +319,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_3: slot = 2
 			KEY_4: slot = 3
 			KEY_5: slot = 4
+		# хранитель ждёт ответа: [1] Сталь / [2] Слово — перехватывает хотбар
+		if game.doctrine_open and slot in [0, 1]:
+			Net.req_doctrine(slot == 0)
+			return
 		if slot >= 0:
 			game.use_item_slot(slot)
 

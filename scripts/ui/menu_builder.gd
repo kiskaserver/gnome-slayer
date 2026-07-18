@@ -403,6 +403,19 @@ func _build_play_section(content: Control) -> Control:
 	_biome_row(box)
 	box.add_child(main._title_label(tr("(в сюжете локации идут по главам)"), 12, Color(0.6, 0.62, 0.66)))
 
+	# происхождение героя (5.0): применяется один раз к свежему герою
+	var orow: HBoxContainer = main._row(box, tr("Происхождение:"))
+	var origin_opt := OptionButton.new()
+	var origin_ids := ["veteran", "scholar", "deserter"]
+	for oid in origin_ids:
+		origin_opt.add_item("%s — %s" % [tr(Quests.ORIGINS[oid].title), tr(Quests.ORIGINS[oid].desc)], origin_opt.item_count)
+	origin_opt.selected = maxi(0, origin_ids.find(Save.hero_origin))
+	origin_opt.custom_minimum_size = Vector2(340, 40)
+	origin_opt.fit_to_longest_item = false
+	orow.add_child(origin_opt)
+	# выбор уже сделан и герой в пути — показываем, но не переигрываем
+	origin_opt.disabled = Save.hero_origin != ""
+
 	var stretch := Control.new()
 	stretch.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_child(stretch)
@@ -415,6 +428,8 @@ func _build_play_section(content: Control) -> Control:
 			Save.reset_campaign()
 		if story and tut_cb.button_pressed:
 			Save.tutorial_done = false # только в памяти: завершение снова запишет флаг
+		if story:
+			Save.apply_origin(origin_ids[origin_opt.selected]) # один раз, для свежего героя
 		Net.continue_campaign = Save.has_campaign()
 		Net.start_single("story" if story else "pve")
 		main.enter_game())

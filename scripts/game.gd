@@ -85,6 +85,8 @@ var camp: CampBuilder
 var zones: ZoneManager
 var tutorial: Tutorial = null    # обучение (D2): только одиночная кампания, гл. 1
 var waypoint_node: Node3D = null # золотой маяк-указатель текущей цели
+var chronicle: Chronicler = null # Летописец (5.0): голос игры в ленте событий
+var doctrine_open := false       # хранитель ждёт ответа: Сталь [1] / Слово [2]
 const SECOND_WIND_HP_FRAC := 0.25
 var _second_wind_used: Dictionary = {}  # id игрока -> уже сработало в этом матче
 var nav_region: NavigationRegion3D = null
@@ -286,8 +288,11 @@ func _ready() -> void:
 	Settings.changed.connect(_apply_gfx_settings)
 	_apply_gfx_settings()
 
+	if is_story():
+		chronicle = Chronicler.new(self)
 	if is_story() and not is_dungeon():
 		_build_camp()
+		chronicle.chapter_start() # сам следит, чтобы не повторяться за главу
 		# обучение: первый запуск одиночной кампании, пока флаг не выставлен
 		if Net.mode == Net.Mode.SINGLE and Net.campaign_chapter == 1 and not Save.tutorial_done:
 			tutorial = Tutorial.new(self)
@@ -508,6 +513,8 @@ func on_player_downed(id: int) -> void:
 		node.go_downed()
 	if id == Net.my_id:
 		hud.center_msg(tr("Ты пал. Друг может поднять тебя (%s)") % main.key_name("interact"))
+		if chronicle != null:
+			chronicle.on_downed_local()
 	else:
 		var pname: String = Net.players[id].name if Net.players.has(id) else tr("Друг")
 		hud.add_chat("", tr("⚑ %s пал — подними его (%s)!") % [pname, main.key_name("interact")], true)
@@ -599,6 +606,8 @@ func on_gnome_spawn(id: int, type: String, x: float, z: float, ex: float, ez: fl
 	var g := Gnome.new()
 	add_child(g)
 	g.setup(self, id, type, Vector3(x, 0.1, z), Vector2(ex, ez), lvl, is_elite)
+	if is_elite and chronicle != null:
+		chronicle.on_elite()
 	if Net.is_server:
 		var factor := (1.0 + 0.5 * maxf(0, Net.players.size() - 1)) * Quests.enemy_hp_mult(lvl)
 		g.hp = roundi(g.hp * factor)
@@ -1373,6 +1382,11 @@ func on_gold(total: int) -> void:
 
 
 func on_sys(text: String) -> void:
+	# формат "Имя||реплика": обе части переводятся отдельно (речи хранителей)
+	if "||" in text:
+		var parts := text.split("||")
+		hud.add_chat(tr(parts[0]), tr(parts[1]), true)
+		return
 	hud.add_chat("", tr(text), true)
 
 
@@ -1400,6 +1414,8 @@ func _server_exit_dungeon() -> void:
 func on_quest(main_st: int, kills: int, side_st: int, side_n: int) -> void:
 	if q_main == 2 and main_st == 3:
 		Achievements.unlock("boss_slayer")
+		if chronicle != null:
+			chronicle.on_boss_dead()
 	q_main = main_st
 	q_kills = kills
 	q_side = side_st
@@ -1584,6 +1600,26 @@ func on_chest_spawn(cid: int, x: float, z: float, rot: float) -> void:
 	node.add_child(body)
 	chests[cid] = {"node": node, "lid": lid, "opened": false, "x": x, "z": z}
 	fx_burst(Vector3(x, 0.6, z), Color(1.0, 0.85, 0.4), 10)
+
+
+# ---------------------------------------------------------------------------
+# Доктрина (5.0): хранитель осколка ждёт ответа — Сталь или Слово
+# ---------------------------------------------------------------------------
+func server_doctrine(sender: int, steel: bool) -> void:
+	quest.server_doctrine(sender, steel)
+
+
+func on_doctrine_open() -> void:
+	doctrine_open = true
+	hud.set_tutorial(tr("Хранитель ждёт ответа: [1] Сталь · [2] Слово"))
+
+
+func on_doctrine_result(steel: bool, by: int) -> void:
+	doctrine_open = false
+	hud.set_tutorial("") # промпт жил на золотой строке; обучение в данж не заходит
+	if chronicle != null:
+		chronicle.on_doctrine(steel)
+	Sfx.play("block" if steel else "pickup", -2.0)
 
 
 ## Есть ли стена/препятствие (слой 1) между двумя точками — на высоте груди,
@@ -1979,6 +2015,8 @@ func on_chest_opened(cid: int) -> void:
 	c.opened = true
 	if tutorial != null:
 		tutorial.notify("chest")
+	if chronicle != null:
+		chronicle.on_first_chest()
 	if c.lid != null:
 		var t := create_tween()
 		t.tween_property(c.lid, "rotation:x", -1.9, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)

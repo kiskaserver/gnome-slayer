@@ -27,6 +27,9 @@ var hero_inventory: Array = []    # предметы Items-формата (id/ki
 var hero_equipment: Dictionary = {"weapon": {}, "trinket": {}}
 var chapter := 1
 var sides_mask := 0
+var doctrine_steel := 0   # доктрина (5.0): счёт Стали за кампанию
+var doctrine_word := 0    # ...и Слова
+var hero_origin := ""     # происхождение героя (veteran/scholar/deserter)
 
 signal slots_changed
 
@@ -124,6 +127,9 @@ func load_slot(i: int) -> void:
 			"trinket": Items.sanitize(raw_eq.get("trinket", {}))}
 	chapter = clampi(int(cfg.get_value("campaign", "chapter", 1)), 1, Quests.CHAPTERS.size())
 	sides_mask = int(cfg.get_value("campaign", "sides_mask", 0))
+	doctrine_steel = int(cfg.get_value("campaign", "doctrine_steel", 0))
+	doctrine_word = int(cfg.get_value("campaign", "doctrine_word", 0))
+	hero_origin = str(cfg.get_value("hero", "origin", ""))
 
 
 func write() -> void:
@@ -135,6 +141,9 @@ func write() -> void:
 	cfg.set_value("hero", "equipment", hero_equipment)
 	cfg.set_value("campaign", "chapter", chapter)
 	cfg.set_value("campaign", "sides_mask", sides_mask)
+	cfg.set_value("campaign", "doctrine_steel", doctrine_steel)
+	cfg.set_value("campaign", "doctrine_word", doctrine_word)
+	cfg.set_value("hero", "origin", hero_origin)
 	cfg.set_value("meta", "save_ver", 2) # 2 = добавлены инвентарь/экипировка (4.0)
 	cfg.set_value("meta", "saved_at", Time.get_datetime_string_from_system(false, true))
 	cfg.save(slot_path(active_slot))
@@ -162,4 +171,24 @@ func has_campaign() -> bool:
 func reset_campaign() -> void:
 	chapter = 1
 	sides_mask = 0
+	doctrine_steel = 0
+	doctrine_word = 0
+	write()
+
+
+## Происхождение (5.0): применяется один раз к свежему герою — стартовые
+## статы, снаряжение и золото отряда стартовой главы.
+func apply_origin(id: String) -> void:
+	var o: Dictionary = Quests.ORIGINS.get(id, {})
+	if o.is_empty() or hero_origin != "":
+		return
+	hero_origin = id
+	for k in o.stats:
+		hero[k] = int(hero.get(k, 0)) + int(o.stats[k])
+	if o.weapon != "":
+		hero_equipment["weapon"] = {"id": o.weapon, "kind": "weapon", "rarity": 0, "aseed": 0, "count": 1}
+	if o.trinket != "":
+		hero_equipment["trinket"] = {"id": o.trinket, "kind": "trinket", "rarity": 0, "aseed": 0, "count": 1}
+	for it in o["items"]:
+		hero_inventory.append({"id": it, "kind": "consumable", "rarity": 0, "aseed": 0, "count": 1})
 	write()

@@ -6,8 +6,8 @@ extends Node
 enum Mode { NONE, SINGLE, HOST, CLIENT }
 
 const DEFAULT_PORT := 7777
-const GAME_VERSION := "4.3" # у хоста и клиента должна совпадать
-	# (4.3: новый оверворлд — генерация из сида разошлась бы со старым клиентом)
+const GAME_VERSION := "5.0" # у хоста и клиента должна совпадать
+	# (5.0: «Осколки смысла» — доктрина/RPC, новый оверворлд и данжи)
 
 var mode: int = Mode.NONE
 var game_mode: String = "pve" # pve | pvp | story
@@ -15,6 +15,9 @@ var campaign_chapter := 1
 var difficulty := "normal" # easy | normal | hard
 var continue_campaign := false # «Продолжить» в меню
 var sides_mask := 0            # выполненные сайды кампании (битовая маска, сервер)
+var doctrine_steel := 0        # доктрина (5.0): ответы Сталью за кампанию
+var doctrine_word := 0         # ...и Словом; вердикт Летописца в финале
+var chronicled_chapter := 0    # локально: глава, уже открытая Летописцем
 
 # --- параметры хост-сессии (для приглашений через Discord) ---
 const MAX_PARTY := 8
@@ -326,6 +329,18 @@ func rpc_secret_opened() -> void:
 func rpc_barrel_boom(bid: int) -> void:
 	if game != null:
 		game.on_barrel_boom(bid)
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_doctrine_open() -> void:
+	if game != null:
+		game.on_doctrine_open()
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_doctrine_result(steel: bool, by: int) -> void:
+	if game != null:
+		game.on_doctrine_result(steel, by)
 
 
 @rpc("authority", "call_local", "reliable")
@@ -763,6 +778,20 @@ func rpc_req_open_chest(cid: int) -> void:
 func rpc_req_secret() -> void:
 	if game != null and is_server:
 		game.server_open_secret(multiplayer.get_remote_sender_id())
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_req_doctrine(steel: bool) -> void:
+	if game != null and is_server:
+		game.server_doctrine(multiplayer.get_remote_sender_id(), steel)
+
+
+func req_doctrine(steel: bool) -> void:
+	if is_server:
+		if game != null:
+			game.server_doctrine(my_id, steel)
+	else:
+		rpc_id(1, "rpc_req_doctrine", steel)
 
 
 func req_secret() -> void:

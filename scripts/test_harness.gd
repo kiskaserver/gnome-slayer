@@ -440,6 +440,17 @@ func tick(delta: float) -> void:
 				str(game.boss_spot != Vector3.INF),
 				str(Net.zone == "dungeon" and game.q_main == 2 and game.server_gold == _test_gold_carry \
 					and boss != null and game.boss_spot != Vector3.INF)])
+			# 5.0: хранитель произнёс тезис — доктрина ждёт ответа; Слово
+			# заставляет его сомневаться (−15% здоровья)
+			var boss50 = game.gnomes.get(game.boss_gid)
+			var bhp0: int = boss50.max_hp if boss50 != null else -1
+			print("[TEST] doctrine: prompt=%s PASS=%s" % [str(game.doctrine_open), str(game.doctrine_open)])
+			game.server_doctrine(1, false) # отвечаем Словом
+			var bhp1: int = boss50.max_hp if boss50 != null else -1
+			print("[TEST] doctrine: word chosen boss hp %d->%d counters s=%d w=%d PASS=%s" % [
+				bhp0, bhp1, Net.doctrine_steel, Net.doctrine_word,
+				str(boss50 != null and bhp1 == roundi(bhp0 * 0.85) and Net.doctrine_word == 1
+					and not game.doctrine_open)])
 			# M5: тема, секретная кладка, решётка со стражем ключа, ниша наград
 			var mb = game.gnomes.get(game.miniboss_gid)
 			print("[TEST] dungeon-m5: theme=%s secret=%s door=%s miniboss=%s rewards=%d PASS=%s" % [

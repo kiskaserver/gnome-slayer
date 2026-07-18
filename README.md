@@ -1,8 +1,8 @@
-﻿# Gnome Slayer (Гномобой)
+# Gnome Slayer (Гномобой)
 
 A co-op 3D action game built with **Godot 4.7**: you are a knight facing hordes of surprisingly well-organized gnomes. Single-player and full multiplayer — PvE co-op and PvP — with **Windows ↔ Linux crossplay**, positional voice chat, and a 6-chapter story campaign with three endings.
 
-**Current version: 4.3.0** · [Play on itch.io](https://itch.io) (search "Gnome Slayer") · Assets: CC0 by [Kay Lousberg](https://kaylousberg.com)
+**Current version: 5.0.0** · [Play on itch.io](https://itch.io) (search "Gnome Slayer") · Assets: CC0 by [Kay Lousberg](https://kaylousberg.com)
 
 ![Meadow](promo/shot_meadow.png)
 
@@ -86,9 +86,18 @@ Co-op specifics:
 - Chest loot is shared — **the whole party receives items** from an opened chest, no loot fights.
 - If everyone is down at once, the run is lost.
 
-## Story campaign
+## Story campaign — Shards of Meaning
 
-King Dungrim of the gnomes, hungry for power, shattered the Mountain Heart — the crystal that fed their lands — and the shard-scattered darkness drove the tribe mad. Six chapters: Meadow → Autumn → Winter → Night → the night **Siege of the Meadow** → the **Lich's Lair**.
+The Mountain Heart was the world's shared meaning. King Dungrim shattered it — *"so that everyone could find their OWN meaning"* — and every gnome tribe seized a shard and built a philosophy around it, taken to absurdity. You are a knight who never read any of the six schools. You have a sword. And somehow it falls to you to put meaning back together.
+
+Each chapter is a **school of thought gone mad**: nihilists who broke your fences because nothing matters, hedonists frying mushrooms over their shard, stoics who confiscated the village firewood ("suffering tempers"), necromantics who insist death is just a change of genre, a swarm that considers your self an illusion — and finally Dungrim himself, politely asking you not to reassemble the Heart, because freedom has *almost* started working. Every shard-keeper delivers their thesis before the fight, and the game asks how you answer:
+
+- **Steel [1]** — your answer is the sword: +20% XP for the keeper;
+- **Word [2]** — you consider their thesis: the keeper starts doubting (−15% HP), but the idea's echo stays with you.
+
+The **Chronicler** — a tired, sarcastic narrator — keeps a running log of your journey in the event feed (your deaths included), and delivers a final verdict at the campaign's end: did you walk this road by Sword or by Thought? On top of that, pick a **hero origin** at the start (Veteran / Scholar / Deserter — different stats, gear and greetings from the Chronicler).
+
+Six chapters: Meadow → Autumn → Winter → Night → the night **Siege of the Meadow** → **Dungrim's Lair**.
 
 Each chapter has:
 

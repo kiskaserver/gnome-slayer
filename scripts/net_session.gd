@@ -29,6 +29,8 @@ func start_single(mode_name: String = "pve") -> void:
 	net.world_seed = randi()
 	net.campaign_chapter = Save.chapter if (net.game_mode == "story" and net.continue_campaign) else 1
 	net.sides_mask = Save.sides_mask if (net.game_mode == "story" and net.continue_campaign) else 0
+	net.doctrine_steel = Save.doctrine_steel if (net.game_mode == "story" and net.continue_campaign) else 0
+	net.doctrine_word = Save.doctrine_word if (net.game_mode == "story" and net.continue_campaign) else 0
 	resolve_biome()
 	net.players = {1: net._fresh_player(net.my_name)}
 
@@ -48,6 +50,8 @@ func start_host(port: int, mode_name: String, private := false) -> Error:
 	net.world_seed = randi()
 	net.campaign_chapter = Save.chapter if (net.game_mode == "story" and net.continue_campaign) else 1
 	net.sides_mask = Save.sides_mask if (net.game_mode == "story" and net.continue_campaign) else 0
+	net.doctrine_steel = Save.doctrine_steel if (net.game_mode == "story" and net.continue_campaign) else 0
+	net.doctrine_word = Save.doctrine_word if (net.game_mode == "story" and net.continue_campaign) else 0
 	resolve_biome()
 	net.players = {1: net._fresh_player(net.my_name)}
 	return OK
