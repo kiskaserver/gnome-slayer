@@ -15,8 +15,8 @@ func _init(game_) -> void:
 ## Считаем по сильнейшему шагу серии с учётом всех множителей и запасом.
 func max_melee_dmg(id: int) -> int:
 	var pd: Dictionary = Net.players.get(id, {})
-	# 42 — самый мощный удар (секира), 1.5 — ярость, 1.8 — крит, аффиксы экипировки
-	var top := 42.0 * 1.5 * Quests.dmg_mult_for(pd) * 1.8 * Quests.crit_dmg_mult_for(pd) \
+	# 62 — тяжёлый удар секиры (36 * 1.7), 1.5 — ярость, 1.8 — крит, аффиксы
+	var top := 62.0 * 1.5 * Quests.dmg_mult_for(pd) * 1.8 * Quests.crit_dmg_mult_for(pd) \
 		* Items.equip_dmg_mult(game.server_equip.get(id, {}))
 	return int(ceil(top)) + 4  # небольшой запас на округления
 
@@ -50,19 +50,26 @@ func server_handle_melee(sender: int, targets: Array, dmg: int, crit: bool) -> v
 				game.server_explode_barrel(bid, sender)
 
 
-func server_damage_player(id: int, dmg: int, from_pos: Vector3, attacker: int = 0) -> void:
+## Возвращает исход: "hit"/"block"/"parry"/"dodge"/"shield"/"" (не применилось).
+## ИИ атакующего по "parry" уходит в стаган — окно для финишера.
+func server_damage_player(id: int, dmg: int, from_pos: Vector3, attacker: int = 0) -> String:
 	var node = game.player_nodes.get(id)
 	if node == null or game.server_hp.get(id, 0) <= 0 or game.match_over:
-		return
+		return ""
 	if game.in_safe_zone(node.global_position):
-		return
+		return ""
 	if node.iframes > 0:
 		Net.bcast("rpc_player_hp", [id, game.server_hp[id], game.player_max_hp(id), "dodge", from_pos.x, from_pos.z])
-		return
+		return "dodge"
 	var flag := "hit"
 	if node.blocking:
 		var to_enemy := atan2(from_pos.x - node.global_position.x, from_pos.z - node.global_position.z)
 		if absf(angle_difference(to_enemy, node.facing)) < 1.4:
+			# парирование (D1): блок поднят в последние мгновения перед ударом —
+			# урон отражён полностью, атакующего ждёт стаган
+			if Time.get_ticks_msec() - node.block_started_ms <= 250:
+				Net.bcast("rpc_player_hp", [id, game.server_hp[id], game.player_max_hp(id), "parry", from_pos.x, from_pos.z])
+				return "parry"
 			dmg = maxi(1, roundi(dmg * 0.15))
 			flag = "block"
 	# барьер поглощает урон
@@ -75,7 +82,7 @@ func server_damage_player(id: int, dmg: int, from_pos: Vector3, attacker: int = 
 			Net.bcast("rpc_buff", [id, "shield_end", 0.0])
 		if dmg <= 0:
 			Net.bcast("rpc_player_hp", [id, game.server_hp[id], game.player_max_hp(id), "shield", from_pos.x, from_pos.z])
-			return
+			return "shield"
 	game.server_hp[id] = game.server_hp[id] - dmg
 	Net.bcast("rpc_player_hp", [id, game.server_hp[id], game.player_max_hp(id), flag, from_pos.x, from_pos.z])
 	if game.server_hp[id] <= 0:
@@ -88,6 +95,7 @@ func server_damage_player(id: int, dmg: int, from_pos: Vector3, attacker: int = 
 		Net.bcast("rpc_buff", [id, "rage", 10.0])
 		Net.bcast("rpc_buff", [id, "speed", 10.0])
 		Net.bcast("rpc_banner", ["ВТОРОЕ ДЫХАНИЕ!"])
+	return flag
 
 
 func _server_player_defeated(id: int, attacker: int) -> void:

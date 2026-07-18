@@ -49,6 +49,12 @@ var dodge_dir := Vector3.ZERO
 var dodge_cooldown := 0.0
 var iframes := 0.0
 var blocking := false
+# парирование (D1): удар в первые мгновения блока отражается без урона
+var block_started_ms := 0
+# заряженная тяжёлая атака (D1): удержание ЛКМ после боя копит замах
+var attack_held := 0.0
+var heavy_step: Dictionary = {}  # активный тяжёлый удар (перебивает шаг комбо)
+const STAM_HEAVY := 25.0
 
 # стамина (D1): бег и перекид тратят, покой восстанавливает; пустая —
 # блокирует спринт и перекид. Чисто локальный ресурс (движение и так
@@ -354,6 +360,15 @@ func on_hp_event(new_hp: int, flag: String, from_pos: Vector3) -> void:
 			game.fx_number(global_position, tr("барьер!"), Color(0.4, 0.75, 1.0))
 			game.fx_burst(global_position + Vector3(0, 1.2, 0), Color(0.4, 0.75, 1.0), 8)
 			Sfx.play_at("block", global_position)
+		"parry":
+			# идеальный блок: урона нет, вспышка стали и возврат стамины
+			game.fx_number(global_position, tr("ПАРИРОВАНИЕ!"), Color(1.0, 0.95, 0.5))
+			game.fx_burst(global_position + Vector3(0, 1.3, 0), Color(1.0, 0.95, 0.6), 14)
+			Sfx.play_at("block", global_position, 4.0, 1.3)
+			if is_local:
+				stamina = minf(STAM_MAX, stamina + 15.0)
+				game.hud.set_stamina(stamina / STAM_MAX)
+				add_shake(0.1)
 		"block":
 			_play("Block_Hit", 1.3)
 			state = "block_hit"
@@ -481,7 +496,10 @@ func apply_net_state(pkt: PackedFloat32Array) -> void:
 	var idx := int(pkt[3])
 	net_anim = ANIM_TABLE[idx] if idx >= 0 and idx < ANIM_TABLE.size() else ""
 	var flags := int(pkt[4])
+	var was_blocking := blocking
 	blocking = (flags & 1) != 0
+	if blocking and not was_blocking:
+		block_started_ms = Time.get_ticks_msec() # окно парирования марионетки
 	iframes = 0.3 if (flags & 2) != 0 else 0.0
 
 

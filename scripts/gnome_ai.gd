@@ -222,7 +222,14 @@ func sim(delta: float) -> void:
 							gn.target.last_attacker_gid = gn.gid
 							gn.target.server_take_damage(out_dmg, gn.global_position, false)
 						else:
-							gn.game.server_damage_player(target_id(), out_dmg, gn.global_position)
+							var res: String = str(gn.game.server_damage_player(target_id(), out_dmg, gn.global_position))
+							if res == "parry":
+								# удар отражён: гном раскрыт — стаган дольше обычного
+								_release_token()
+								gn.attack_swinging = false
+								set_state("stagger")
+								gn.state_time = -0.5
+								gn.game.bcast_gnome_event(gn.gid, "parried", [])
 				if gn.state_time >= gn.attack_dur:
 					_finish_attack()
 					if gn.cfg.retreats:

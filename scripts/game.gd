@@ -468,8 +468,8 @@ func server_handle_melee(sender: int, targets: Array, dmg: int, crit: bool) -> v
 	combat.server_handle_melee(sender, targets, dmg, crit)
 
 
-func server_damage_player(id: int, dmg: int, from_pos: Vector3, attacker: int = 0) -> void:
-	combat.server_damage_player(id, dmg, from_pos, attacker)
+func server_damage_player(id: int, dmg: int, from_pos: Vector3, attacker: int = 0) -> String:
+	return combat.server_damage_player(id, dmg, from_pos, attacker)
 
 
 func server_revive_tick(reviver: int, target: int) -> void:

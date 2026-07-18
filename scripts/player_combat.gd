@@ -23,6 +23,7 @@ func try_attack() -> void:
 
 
 func start_attack() -> void:
+	p.heavy_step = {}
 	var step: Dictionary = p.active_combo()[p.combo_step]
 	p.state = "attack"
 	p.state_time = 0.0
@@ -34,6 +35,23 @@ func start_attack() -> void:
 		p.facing = p.cam_yaw.rotation.y + PI # арбалет целится по камере, не по ближайшему врагу
 	else:
 		_face_nearest_enemy()
+
+
+## Тяжёлый удар с замаха: больнее и шире последнего шага комбо, жрёт стамину.
+func release_heavy() -> void:
+	p.drain_stamina(p.STAM_HEAVY)
+	var base: Dictionary = p.active_combo()[p.active_combo().size() - 1]
+	p.heavy_step = {"anim": base.anim, "dmg": roundi(base.dmg * 1.7),
+		"range": base.range + 0.3, "arc": minf(base.arc * 1.7, 2.9), "ts": base.ts * 0.9}
+	p.state = "attack"
+	p.state_time = 0.0
+	p.hit_done = false
+	p.combo_queued = false
+	p.attack_held = 0.0
+	p.attack_dur = p._play(p.heavy_step.anim, p.heavy_step.ts)
+	Sfx.play_at("swing", p.global_position, 2.0, 0.8)
+	p.add_shake(0.1)
+	_face_nearest_enemy()
 
 
 func _face_nearest_enemy() -> void:

@@ -72,23 +72,39 @@ func local_sim(delta: float) -> void:
 	var running: bool = Input.is_action_pressed("run") and input_captured and p.stamina > 1.0
 	var want_block: bool = Input.is_action_pressed("block") and input_captured
 
+	# тяжёлая атака: удержание ЛКМ вне боя копит замах (стрелковому не нужно)
+	if input_captured and Input.is_action_pressed("attack") and not p.is_ranged_weapon():
+		p.attack_held += delta
+	else:
+		p.attack_held = 0.0
+
 	var speed_mul := 1.0
 	p.blocking = false
 
 	match p.state:
 		"attack":
 			speed_mul = 0.12
-			var step: Dictionary = p.active_combo()[p.combo_step]
+			# тяжёлый удар перебивает шаг комбо своими параметрами
+			var step: Dictionary = p.heavy_step if not p.heavy_step.is_empty() else p.active_combo()[p.combo_step]
 			if not p.hit_done and p.state_time >= p.attack_dur * 0.38:
 				p.hit_done = true
 				p.combat.deal_damage(step)
-			if p.state_time >= p.attack_dur * 0.72 and p.combo_queued:
+			if p.state_time >= p.attack_dur * 0.72 and p.combo_queued and p.heavy_step.is_empty():
 				p.combo_step = (p.combo_step + 1) % p.active_combo().size()
 				p.combat.start_attack()
 			elif p.state_time >= p.attack_dur:
 				p.state = "idle"
+				p.heavy_step = {}
 				p.combo_step = (p.combo_step + 1) % p.active_combo().size()
 				p.combo_reset = 1.2
+		"charge":
+			# замах: медленный шаг, доворот за камерой; отпустили — удар
+			speed_mul = 0.2
+			p.facing = rotate_toward(p.facing, p.cam_yaw.rotation.y + PI, p.TURN_SPEED * 0.6 * delta)
+			if not (input_captured and Input.is_action_pressed("attack")):
+				p.combat.release_heavy()
+			elif p.state_time > 2.5:
+				p.state = "idle" # бесконечно замахиваться нельзя
 		"dodge":
 			var t: float = p.state_time / 0.45
 			if t >= 1.0:
@@ -128,7 +144,14 @@ func local_sim(delta: float) -> void:
 		_:
 			if want_block:
 				p.state = "block"
+				p.block_started_ms = Time.get_ticks_msec() # старт окна парирования
 				p._play("Blocking")
+			elif p.attack_held > 0.5 and p.stamina >= p.STAM_HEAVY and not p.is_ranged_weapon():
+				# накопили замах — переходим в зарядку тяжёлого удара
+				p.state = "charge"
+				p.state_time = 0.0
+				var cb: Array = p.active_combo()
+				p._play(cb[cb.size() - 1].anim, 0.35)
 
 	# поднятие павшего друга (E рядом с упавшим) — наклоняемся и тянем, а не стоим истуканом
 	_revive_send_timer -= delta

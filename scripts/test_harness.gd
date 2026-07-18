@@ -21,6 +21,7 @@ var _test_paused := false
 var _pause_snapshot := {}
 var _start_chapter := 1 # --chapter=N: сюжетный прогон с главы N (компоновка поздних глав)
 var _test_stam_checked := false
+var _test_parry_checked := false
 
 var game: Game:
 	get:
@@ -246,7 +247,13 @@ func tick(delta: float) -> void:
 				var attacked: bool = me.state == "attack" or me.combo_step > 0
 				print("[TEST] input-check: camera=%s attack=%s (state=%s)" % [
 					"PASS" if yaw_moved else "FAIL",
-					"PASS" if attacked else "FAIL", me.state]))
+					"PASS" if attacked else "FAIL", me.state])
+				# отпустить синтетический клик — иначе герой вечно копит замах
+				var rel := InputEventMouseButton.new()
+				rel.button_index = MOUSE_BUTTON_LEFT
+				rel.pressed = false
+				rel.position = click.position
+				Input.parse_input_event(rel))
 
 	if _tod_override >= 0 and game != null and game.daynight != null:
 		game.daynight.time = _tod_override
@@ -703,6 +710,36 @@ func tick(delta: float) -> void:
 					str(drained and blocked and me_s.stamina > 5.0)]))
 		else:
 			print("[TEST] stamina: SKIP (player busy: %s)" % (me_s.state if me_s != null else "null"))
+
+	# парирование + тяжёлый удар (D1)
+	if _test_mode == "single" and not _test_parry_checked and _test_timer > 21.0 and game != null:
+		_test_parry_checked = true
+		var me_p: PlayerChar = game.player_nodes.get(Net.my_id)
+		if me_p != null:
+			# свежий блок в сторону удара -> парирование без урона
+			var apos: Vector3 = me_p.global_position + Vector3(sin(me_p.facing), 0, cos(me_p.facing)) * 2.0
+			me_p.blocking = true
+			me_p.block_started_ms = Time.get_ticks_msec()
+			var hp0: int = game.server_hp[1]
+			var res1: String = str(game.server_damage_player(1, 20, apos))
+			# устаревший блок -> обычное блокирование с уроном 15%
+			me_p.blocking = true
+			me_p.block_started_ms = Time.get_ticks_msec() - 600
+			var res2: String = str(game.server_damage_player(1, 20, apos))
+			var hp2: int = game.server_hp[1]
+			me_p.blocking = false
+			print("[TEST] parry: fresh=%s stale=%s hp %d->%d PASS=%s" % [
+				res1, res2, hp0, hp2,
+				str(res1 == "parry" and res2 == "block" and hp2 == hp0 - maxi(1, roundi(20 * 0.15)))])
+			# тяжёлый удар: замах из зарядки тратит стамину и бьёт сильнее комбо
+			me_p.state = "idle"
+			me_p.stamina = me_p.STAM_MAX
+			me_p.combat.release_heavy()
+			var base_dmg: int = me_p.active_combo()[me_p.active_combo().size() - 1].dmg
+			print("[TEST] heavy: state=%s dmg=%d>base=%d stamina=%.0f PASS=%s" % [
+				me_p.state, me_p.heavy_step.get("dmg", 0), base_dmg, me_p.stamina,
+				str(me_p.state == "attack" and me_p.heavy_step.get("dmg", 0) > base_dmg
+					and me_p.stamina <= me_p.STAM_MAX - me_p.STAM_HEAVY + 0.1)])
 
 	# тест паузы: в одиночке мир должен замирать
 	if _test_mode == "single" and not _test_paused and _test_timer > 7.0 and game != null:

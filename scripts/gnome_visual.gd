@@ -139,6 +139,13 @@ func on_event(ev: String, data: Array) -> void:
 			gn.one_shot_until = gn.age + 0.6
 			gn._play("Cheer", 1.8, true)
 			Sfx.play_at("war_cry", gn.global_position)
+		"parried":
+			# удар отбит парированием: гном отшатнулся и раскрылся
+			gn.one_shot_until = gn.age + 0.9
+			gn._play(gn.cfg.hit_anim, 1.1, true)
+			Sfx.play_at("block", gn.global_position, 3.0, 1.25)
+			gn.game.fx_burst(gn.global_position + Vector3(0, 1.0, 0), Color(1.0, 0.95, 0.6), 12)
+			gn.game.fx_number(gn.global_position, tr("ПАРИРОВАНО!"), Color(1.0, 0.95, 0.5))
 		"special_telegraph":
 			var kind: String = data[0]
 			var label: String = {"slam": "ГОТОВИТ УДАР!", "charge": "ГОТОВИТ РЫВОК!", "summon": "ПРИЗЫВАЕТ ПОДКРЕПЛЕНИЕ!"}.get(kind, "!")
