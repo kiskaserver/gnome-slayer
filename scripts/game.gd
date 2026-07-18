@@ -64,7 +64,9 @@ var _entrance_hint := Vector2.INF    # где вход в склеп (проне
 var _carry_restored := false         # состояние восстановлено из Net.carry
 var _trap_tick := 0.0
 var portal_mode := "chapter"         # chapter | dungeon_exit
-var _shrine_cd: Dictionary = {}  # индекс точки интереса -> время, когда снова можно благословить
+# сервисы (создаются в _ready): лавка и точки интереса
+var shop_svc: ShopService
+var poi_svc: PoiService
 const SECOND_WIND_HP_FRAC := 0.25
 var _second_wind_used: Dictionary = {}  # id игрока -> уже сработало в этом матче
 var nav_region: NavigationRegion3D = null
@@ -211,6 +213,8 @@ func diff() -> Dictionary:
 
 
 func _ready() -> void:
+	shop_svc = ShopService.new(self)
+	poi_svc = PoiService.new(self)
 	if _model_cache.is_empty():
 		for m in ["Knight", "Barbarian", "Mage", "Rogue_Hooded",
 				"Skeleton_Warrior", "Skeleton_Mage", "Skeleton_Minion", "Skeleton_Rogue",
@@ -1067,7 +1071,7 @@ func _server_restart_match() -> void:
 	server_shield.clear()
 	attackers.clear()
 	_second_wind_used.clear()
-	_bounty_used.clear() # доски объявлений снова активны в новом матче
+	poi_svc.reset_bounties() # доски объявлений снова активны в новом матче
 	for id in server_hp:
 		server_hp[id] = player_max_hp(id)
 		var pos := _player_spawn_pos()
@@ -1100,7 +1104,7 @@ func server_restart_single() -> void:
 	attackers.clear()
 	server_shield.clear()
 	_second_wind_used.clear() # иначе «второе дыхание» не сработает до конца сессии
-	_bounty_used.clear()      # доски объявлений снова активны в новом матче
+	poi_svc.reset_bounties()  # доски объявлений снова активны в новом матче
 	server_hp[1] = player_max_hp(1) # с учётом Живучести, не голая константа
 	Net.bcast("rpc_player_respawn", [1, 0.0, 0.0])
 	wave = 0
@@ -1826,65 +1830,22 @@ func dialog_closed(advance: String) -> void:
 
 
 # ---------------------------------------------------------------------------
-# Лавка торговца
+# Лавка торговца — реализация в scripts/systems/shop_service.gd
 # ---------------------------------------------------------------------------
 func open_shop() -> void:
-	ui_blocked = true
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	hud.open_shop(Items.shop_stock(Net.world_seed, Net.campaign_chapter), inventory, gold)
+	shop_svc.open_shop()
 
 
 func close_shop() -> void:
-	ui_blocked = false
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	hud.close_shop()
+	shop_svc.close_shop()
 
 
-## Покупка (сервер): позиция ассортимента пересчитывается тем же сидом —
-## клиент не может подсунуть свой товар или цену.
 func server_buy(sender: int, stock_idx: int) -> void:
-	if not is_story() or match_over:
-		return
-	var stock := Items.shop_stock(Net.world_seed, Net.campaign_chapter)
-	if stock_idx < 0 or stock_idx >= stock.size():
-		return
-	var entry: Dictionary = stock[stock_idx]
-	if server_gold < entry.price:
-		Net.send_sys(sender, "Не хватает золота.")
-		return
-	var item: Dictionary = entry.item.duplicate(true)
-	var ok: bool
-	if item.kind == "consumable":
-		_server_grant_item(sender, item.id)
-		ok = true
-	else:
-		ok = _server_grant_equipment(sender, item)
-	if not ok:
-		Net.send_sys(sender, "Инвентарь полон.")
-		return
-	server_gold -= entry.price
-	Net.bcast("rpc_gold", [server_gold])
-	Net.send_sys(sender, "Куплено: %s" % tr(Items.def_name(item)))
+	shop_svc.server_buy(sender, stock_idx)
 
 
-## Продажа (сервер): предмет из инвентаря — в золото отряда.
 func server_sell(sender: int, inv_idx: int) -> void:
-	if not is_story() or match_over:
-		return
-	var inv: Array = server_inv.get(sender, [])
-	if inv_idx < 0 or inv_idx >= inv.size():
-		return
-	var item: Dictionary = inv[inv_idx]
-	var price := Items.sell_price(item)
-	if int(item.get("count", 1)) > 1:
-		item.count -= 1
-	else:
-		inv.remove_at(inv_idx)
-	server_inv[sender] = inv
-	_sync_inv(sender)
-	server_gold += price
-	Net.bcast("rpc_gold", [server_gold])
-	Net.send_sys(sender, "Продано: %s (+%d з.)" % [tr(Items.def_name(item)), price])
+	shop_svc.server_sell(sender, inv_idx)
 
 
 # --- серверная логика квестов ---
@@ -2494,126 +2455,33 @@ func find_chest_near(pos: Vector3, radius: float) -> int:
 
 
 ## Точки интереса — индекс в world_pois, или -1 если рядом ничего нет.
+# --- точки интереса: реализация в scripts/systems/poi_service.gd ---
 func find_poi_near(pos: Vector3, radius: float) -> int:
-	for i in world_pois.size():
-		var p: Dictionary = world_pois[i]
-		if Vector2(p.x - pos.x, p.z - pos.z).length() < radius:
-			return i
-	return -1
+	return poi_svc.find_poi_near(pos, radius)
 
 
-## Осмотреть лор-деталь (руины/менгиры/гробница/поле боя) — чисто текст, локально
-## у каждого клиента, снаряд не нужен: детали детерминированы сидом и одинаковы
-## у всех игроков.
 func start_lore(idx: int) -> void:
-	if idx < 0 or idx >= world_pois.size():
-		return
-	var poi: Dictionary = world_pois[idx]
-	var pool: Array
-	match poi.kind:
-		"ruins":
-			pool = Quests.LORE_RUINS
-		"standing_stones":
-			pool = Quests.LORE_STONES
-		"crypt":
-			pool = Quests.LORE_CRYPT
-		"battlefield":
-			pool = Quests.LORE_BATTLEFIELD
-		_:
-			return
-	var line_idx: int = (Net.world_seed + idx) % pool.size()
-	var text: String = pool[line_idx]
-	ui_blocked = true
-	hud.show_dialog([["", text]], "")
-	Achievements.unlock("lore_hunter")
-	Achievements.mark_lore("%s_%d" % [poi.kind, line_idx])
+	poi_svc.start_lore(idx)
 
 
-const SHRINE_BLESS_CD := 45.0
-const CAMPFIRE_CD := 40.0
-const WELL_CD := 25.0
-var _campfire_cd: Dictionary = {}  # индекс поинта -> время следующего доступного отдыха
-var _well_cd: Dictionary = {}
-var _bounty_used: Dictionary = {}  # индекс доски объявлений -> заказ уже забран в этом матче
-
-
-## Благословение у святилища (сервер): временный баф взамен небольшого ожидания.
 func server_shrine_bless(sender: int, idx: int) -> void:
-	if idx < 0 or idx >= world_pois.size() or world_pois[idx].kind != "shrine":
-		return
-	var now := Time.get_ticks_msec() / 1000.0
-	if now < _shrine_cd.get(idx, 0.0):
-		Net.send_sys(sender, "Святилище ещё не готово благословлять снова.")
-		return
-	_shrine_cd[idx] = now + SHRINE_BLESS_CD
-	Net.bcast("rpc_buff", [sender, "speed", PICKUP_TYPES.speed.dur])
-	Net.bcast("rpc_buff", [sender, "rage", PICKUP_TYPES.rage.dur])
-	Net.bcast("rpc_banner", [Quests.LORE_SHRINE_BANNER])
+	poi_svc.server_shrine_bless(sender, idx)
 
 
-## Единая точка входа для интерактивных точек, требующих сервера (не чисто
-## текстовый лор) — диспетчер по виду поинта.
 func server_poi_interact(sender: int, idx: int) -> void:
-	if idx < 0 or idx >= world_pois.size():
-		return
-	match world_pois[idx].kind:
-		"shrine":
-			server_shrine_bless(sender, idx)
-		"campfire":
-			server_campfire_rest(sender, idx)
-		"well":
-			server_well_drink(sender, idx)
-		"bounty_board":
-			server_bounty_read(sender, idx)
+	poi_svc.server_poi_interact(sender, idx)
 
 
-## Отдых у костра: небольшой мгновенный хил плюс короткий барьер — согревает
-## перед дорогой, но слабее полноценного благословения святилища.
 func server_campfire_rest(sender: int, idx: int) -> void:
-	if idx < 0 or idx >= world_pois.size() or world_pois[idx].kind != "campfire":
-		return
-	var now := Time.get_ticks_msec() / 1000.0
-	if now < _campfire_cd.get(idx, 0.0):
-		Net.send_sys(sender, "Костёр ещё прогорает — не время греться снова.")
-		return
-	_campfire_cd[idx] = now + CAMPFIRE_CD
-	server_heal_player(sender, roundi(player_max_hp(sender) * 0.3))
-	server_shield[sender] = server_shield.get(sender, 0) + 25
-	Net.bcast("rpc_buff", [sender, "shield", 20.0])
-	Net.bcast("rpc_banner", [Quests.LORE_CAMPFIRE_BANNER])
-	# в мире-путешествии тронутый костёр становится чекпоинтом отряда
-	if not world_areas.is_empty():
-		team_checkpoint = Vector2(world_pois[idx].x, world_pois[idx].z)
-		Net.send_sys(sender, "Костёр запомнил вас: отряд возродится здесь.")
+	poi_svc.server_campfire_rest(sender, idx)
 
 
-## Колодец: чистый хил без бафа, но чаще доступен, чем костёр или святилище.
 func server_well_drink(sender: int, idx: int) -> void:
-	if idx < 0 or idx >= world_pois.size() or world_pois[idx].kind != "well":
-		return
-	var now := Time.get_ticks_msec() / 1000.0
-	if now < _well_cd.get(idx, 0.0):
-		Net.send_sys(sender, "Колодец ещё не набрал воды.")
-		return
-	_well_cd[idx] = now + WELL_CD
-	server_heal_player(sender, roundi(player_max_hp(sender) * 0.4))
-	Net.bcast("rpc_banner", [Quests.LORE_WELL_BANNER])
+	poi_svc.server_well_drink(sender, idx)
 
 
-## Доска объявлений: одноразовый за матч заказ на элитного гнома неподалёку.
 func server_bounty_read(sender: int, idx: int) -> void:
-	if idx < 0 or idx >= world_pois.size() or world_pois[idx].kind != "bounty_board":
-		return
-	if _bounty_used.get(idx, false):
-		Net.send_sys(sender, "Награда за эту доску уже забрана.")
-		return
-	_bounty_used[idx] = true
-	var poi: Dictionary = world_pois[idx]
-	var roles: Dictionary = BIOME_ENEMIES.get(Net.biome, BIOME_ENEMIES["meadow"])
-	var a := randf_range(0, TAU)
-	var spawn_pos := Vector3(poi.x + cos(a) * 5.0, 0, poi.z + sin(a) * 5.0)
-	server_spawn_gnome_at(roles.melee, spawn_pos, enemy_level() + 1, true)
-	Net.bcast("rpc_banner", [Quests.LORE_BOUNTY_BANNER])
+	poi_svc.server_bounty_read(sender, idx)
 
 
 func server_open_chest(opener: int, cid: int) -> void:
