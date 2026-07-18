@@ -66,6 +66,12 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 	# --- застройка поселения (кольцом, с проверкой пересечений) ---
 	WgGeom._place_settlement(parent, rng, settle_c, road, obstacles)
 
+	# --- ядра областей (C1): сгруппированные композиции вместо пустоты ---
+	WgCores._core_settlement(parent, rng, settle_c, road, obstacles)
+	WgCores._core_battlefield(parent, rng, battle_c, obstacles)
+	WgCores._core_grove(parent, rng, b, grove_c, obstacles)
+	WgCores._core_approach(parent, rng, approach_c, dirv, sidev, obstacles)
+
 	# --- ворота в открытых промежутках дороги (открытые створки) ---
 	WgGeom._place_gates(parent, rng, main_samples, areas, obstacles)
 
@@ -93,6 +99,9 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 
 	# --- фонари вдоль магистрали (сбоку, по локальному перпендикуляру) ---
 	WgGeom._place_lanterns(parent, rng, main_samples, obstacles)
+
+	# --- тупички-кеши от дороги: тайник с отблеском, сундук поставит сервер ---
+	var caches := WgCores._road_caches(parent, rng, main_samples, areas, obstacles)
 
 	# --- точки интереса: по одной на область (кроме лагеря и подхода) ---
 	var poi_kinds := ["ruins", "standing_stones", "shrine", "campfire", "well", "bounty_board", "crypt", "battlefield"]
@@ -190,4 +199,5 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 	return {"spawn_points": spawn_points, "houses": houses, "nav_region": region,
 		"sun": envd.sun, "moon": envd.moon, "env": envd.env, "sky_mat": envd.sky_mat,
 		"biome": b, "obstacles": obstacles, "pois": pois,
-		"areas": areas, "road": road_pts, "dungeon_entrance": dungeon_entrance}
+		"areas": areas, "road": road_pts, "dungeon_entrance": dungeon_entrance,
+		"caches": caches}

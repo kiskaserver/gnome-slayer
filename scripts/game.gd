@@ -52,6 +52,7 @@ var spawn_points: Array = []
 var houses: Array = []
 var world_obstacles: Array = []
 var world_pois: Array = []
+var world_caches: Array = []         # тайники у тупичков дороги: сюда встают первые сундуки
 var world_areas: Array = []          # оверворлд: [{id, kind, center, radius}]
 var world_road: Array = []           # вейпоинты главной дороги
 var dungeon_entrance := Vector3.INF  # точка входа в подземелье
@@ -227,6 +228,7 @@ func _ready() -> void:
 	world_areas = data.get("areas", [])
 	world_road = data.get("road", [])
 	dungeon_entrance = data.get("dungeon_entrance", Vector3.INF)
+	world_caches = data.get("caches", [])
 	boss_spot = data.get("boss_spot", Vector3.INF)
 	dungeon_traps = data.get("traps", [])
 	dungeon_chest_spots = data.get("chest_spots", [])

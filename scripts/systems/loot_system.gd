@@ -14,6 +14,13 @@ func place_chests(count: int) -> void:
 	if game.is_pvp():
 		return # в ПвП сундуков нет — только честная сталь
 	var placed := 0
+	# сперва тайники у тупичков дороги (C1): сундук ждёт в конце тропы,
+	# рядом с монетами и отблеском — исследование коротких ответвлений окупается
+	while not game.world_caches.is_empty() and placed < count:
+		var cpos: Vector3 = game.world_caches.pop_front()
+		placed += 1
+		game.chest_seq += 1
+		Net.bcast("rpc_chest_spawn", [game.chest_seq, cpos.x, cpos.z, randf_range(0, TAU)])
 	for _try in 60:
 		if placed >= count:
 			break
