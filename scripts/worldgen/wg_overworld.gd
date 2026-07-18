@@ -24,22 +24,24 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 	var dirv := Vector3(cos(road_a), 0, sin(road_a))
 	var sidev := Vector3(-dirv.z, 0, dirv.x)
 
+	# Стянутая карта-путешествие (C0): области ближе, перегоны короче —
+	# насыщенность вместо пустых полян между ориентирами.
 	var areas: Array = []
-	areas.append({"id": "camp", "kind": "camp", "center": Vector3(6, 0, 6), "radius": 22.0})
-	var settle_c: Vector3 = dirv * 52.0 + sidev * rng.randf_range(-8.0, 8.0)
-	areas.append({"id": "settlement", "kind": "settlement", "center": settle_c, "radius": 20.0})
+	areas.append({"id": "camp", "kind": "camp", "center": Vector3(6, 0, 6), "radius": 20.0})
+	var settle_c: Vector3 = dirv * 38.0 + sidev * rng.randf_range(-6.0, 6.0)
+	areas.append({"id": "settlement", "kind": "settlement", "center": settle_c, "radius": 18.0})
 	var side_sign := 1.0 if rng.randf() < 0.5 else -1.0
-	var battle_c: Vector3 = dirv * 78.0 + sidev * (30.0 * side_sign)
-	areas.append({"id": "battlefield", "kind": "battlefield", "center": battle_c, "radius": 21.0})
-	var grove_c: Vector3 = dirv * 74.0 - sidev * (32.0 * side_sign)
-	areas.append({"id": "grove", "kind": "grove", "center": grove_c, "radius": 19.0})
-	var approach_c: Vector3 = dirv * 100.0
-	areas.append({"id": "approach", "kind": "approach", "center": approach_c, "radius": 17.0})
+	var battle_c: Vector3 = dirv * 55.0 + sidev * (22.0 * side_sign)
+	areas.append({"id": "battlefield", "kind": "battlefield", "center": battle_c, "radius": 17.0})
+	var grove_c: Vector3 = dirv * 52.0 - sidev * (23.0 * side_sign)
+	areas.append({"id": "grove", "kind": "grove", "center": grove_c, "radius": 16.0})
+	var approach_c: Vector3 = dirv * 66.0
+	areas.append({"id": "approach", "kind": "approach", "center": approach_c, "radius": 14.0})
 
 	# --- дорога: лагерь -> поселение -> развилка -> подход к подземелью ---
 	# main_samples — только магистраль (для ворот и фонарей вдоль неё)
-	var fork: Vector3 = dirv * 72.0
-	var road_pts := [Vector3(6, 0, 6), dirv * 26.0, settle_c, fork, approach_c]
+	var fork: Vector3 = dirv * 50.0
+	var road_pts := [Vector3(6, 0, 6), dirv * 19.0, settle_c, fork, approach_c]
 	var main_samples := WgGeom._lay_road(parent, rng, road_pts)
 	var road := main_samples.duplicate()
 	# боковые тропы к полю боя и роще
@@ -48,7 +50,7 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 
 	# --- вход в подземелье: крипта с аркой на дальнем краю (ставим первой,
 	# как ориентир, и регистрируем в obstacles — всё прочее её обходит) ---
-	var crypt_pos: Vector3 = approach_c + dirv * 8.0
+	var crypt_pos: Vector3 = approach_c + dirv * 7.0
 	var crypt_yaw := atan2(-dirv.x, -dirv.z) # фасад к дороге
 	var crypt := WgLib.place_prop(parent, "halloween/crypt.gltf", crypt_pos, crypt_yaw, 1.25)
 	for mi in crypt.find_children("*", "MeshInstance3D", true, false):
@@ -131,9 +133,10 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 				"battlefield": WgPois._poi_battlefield(parent, rng, pos, obstacles)
 			pois.append({"kind": kind, "x": pos.x, "z": pos.z})
 
-	# --- лесные пояса: между лагерем и серединой, между серединой и краем ---
-	WgGeom._forest_belt(parent, rng, b, 26.0, 40.0, 90, road, areas, obstacles)
-	WgGeom._forest_belt(parent, rng, b, 58.0, 92.0, 150, road, areas, obstacles)
+	# --- лесные пояса: резко прорежены (C0) — лес формирует пространство,
+	# а не заполняет его; плотные «рощи» остаются только между областями ---
+	WgGeom._forest_belt(parent, rng, b, 22.0, 32.0, 46, road, areas, obstacles)
+	WgGeom._forest_belt(parent, rng, b, 42.0, 62.0, 74, road, areas, obstacles)
 	# лес за границей мира (декорация — без теней)
 	for i in 70:
 		var a := float(i) / 70.0 * TAU + rng.randf_range(-0.05, 0.05)

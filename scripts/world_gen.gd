@@ -5,7 +5,8 @@ extends RefCounted
 ## навигационная сетка. Детерминирована сидом.
 
 const WORLD_RADIUS := 58.0
-const OVERWORLD_RADIUS := 120.0  # сюжетный мир-путешествие (арена волн/ПвП остаётся 58)
+const OVERWORLD_RADIUS := 80.0  # сюжетный мир-путешествие (арена волн/ПвП остаётся 58);
+	# 4.3: стянут со 120 — «меньше площади, больше содержания» (мастер-план C0)
 
 const BIOME_LIST := ["meadow", "winter", "autumn", "night"]
 
