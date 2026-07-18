@@ -69,6 +69,7 @@ var shop_svc: ShopService
 var poi_svc: PoiService
 var combat: CombatRules
 var spawn: SpawnDirector
+var loot: LootSystem
 const SECOND_WIND_HP_FRAC := 0.25
 var _second_wind_used: Dictionary = {}  # id игрока -> уже сработало в этом матче
 var nav_region: NavigationRegion3D = null
@@ -219,6 +220,7 @@ func _ready() -> void:
 	poi_svc = PoiService.new(self)
 	combat = CombatRules.new(self)
 	spawn = SpawnDirector.new(self)
+	loot = LootSystem.new(self)
 	if _model_cache.is_empty():
 		for m in ["Knight", "Barbarian", "Mage", "Rogue_Hooded",
 				"Skeleton_Warrior", "Skeleton_Mage", "Skeleton_Minion", "Skeleton_Rogue",
@@ -1056,45 +1058,6 @@ func on_pickup_taken(pid: int) -> void:
 	if pickups.has(pid):
 		pickups[pid].node.queue_free()
 		pickups.erase(pid)
-
-
-func _update_pickups(delta: float) -> void:
-	for pid in pickups.keys():
-		var pk: Dictionary = pickups[pid]
-		pk.life += delta
-		pk.node.position.y = 0.15 + sin(pk.life * 3.0) * 0.12
-		pk.node.rotation.y += delta * 2.0
-		if not Net.is_server:
-			continue
-		if pk.life < 1.0:
-			continue # дать заметить, а не съедать в кадр появления
-		var taken_by := 0
-		for id in player_nodes:
-			if server_hp.get(id, 0) <= 0:
-				continue
-			if pk.type == "heal" and server_hp.get(id, 0) >= player_max_hp(id):
-				continue # гриб при полном здоровье не тратится
-			if pk.node.global_position.distance_to(player_nodes[id].global_position) < 1.4:
-				taken_by = id
-				break
-		if taken_by != 0:
-			match pk.type:
-				"heal":
-					server_heal_player(taken_by, 20)
-				"shield":
-					server_shield[taken_by] = SHIELD_POINTS
-					Net.bcast("rpc_buff", [taken_by, "shield", 999.0])
-				"potion_hp", "potion_rage", "potion_speed", "bomb", "gold_feast":
-					_server_grant_item(taken_by, pk.type)
-				_:
-					Net.bcast("rpc_buff", [taken_by, pk.type, PICKUP_TYPES[pk.type].dur])
-			pickups.erase(pid)
-			pk.node.queue_free()
-			Net.bcast("rpc_pickup_taken", [pid])
-		elif pk.life > 30.0:
-			pickups.erase(pid)
-			pk.node.queue_free()
-			Net.bcast("rpc_pickup_taken", [pid])
 
 
 # ---------------------------------------------------------------------------
@@ -2047,50 +2010,7 @@ func server_unlock_skill(id: int, skill_id: String) -> void:
 # Сундуки
 # ---------------------------------------------------------------------------
 func _server_place_chests(count: int) -> void:
-	if is_pvp():
-		return # в ПвП сундуков нет — только честная сталь
-	var placed := 0
-	for _try in 60:
-		if placed >= count:
-			break
-		var x: float
-		var z: float
-		if not world_areas.is_empty():
-			# оверворлд: сундуки внутри областей (есть смысл исследовать каждую)
-			var area: Dictionary = world_areas[randi() % world_areas.size()]
-			var aa := randf_range(0, TAU)
-			var ar: float = area.radius * randf_range(0.3, 0.85)
-			x = area.center.x + cos(aa) * ar
-			z = area.center.z + sin(aa) * ar
-		else:
-			var a := randf_range(0, TAU)
-			var r := randf_range(8.0, WorldGen.WORLD_RADIUS - 5.0)
-			x = cos(a) * r
-			z = sin(a) * r
-		var ok := true
-		for h in houses:
-			if Vector2(h.x - x, h.z - z).length() < 5.0:
-				ok = false
-				break
-		for c in chests.values():
-			if Vector2(c.x - x, c.z - z).length() < 7.0:
-				ok = false
-				break
-		if ok:
-			for o in world_obstacles:
-				if Vector2(o.x - x, o.z - z).length() < o.r + 1.3:
-					ok = false
-					break
-		if ok:
-			placed += 1
-			chest_seq += 1
-			Net.bcast("rpc_chest_spawn", [chest_seq, x, z, randf_range(0, TAU)])
-	# сундуки — препятствия, появившиеся после первой запечки навсетки;
-	# без перезапечки враги (сервер) шли бы напролом и «бились» о них.
-	# Если самая первая запечка ещё не закончилась (сундуки при старте матча),
-	# повторный вызов — ошибка; она и так подхватит уже добавленные сундуки.
-	if placed > 0 and Net.is_server and nav_region != null and nav_ready:
-		nav_region.bake_navigation_mesh(true)
+	loot.place_chests(count)
 
 
 func on_chest_spawn(cid: int, x: float, z: float, rot: float) -> void:
@@ -2162,107 +2082,19 @@ func server_bounty_read(sender: int, idx: int) -> void:
 
 
 func server_open_chest(opener: int, cid: int) -> void:
-	var c: Dictionary = chests.get(cid, {})
-	if c.is_empty() or c.opened or match_over:
-		return
-	var pn = player_nodes.get(opener)
-	if pn == null or pn.global_position.distance_to(Vector3(c.x, 0, c.z)) > 3.0:
-		return
-	c.opened = true
-	Net.bcast("rpc_chest_opened", [cid])
-	if is_story():
-		server_gold += randi_range(8, 14)
-		Net.bcast("rpc_gold", [server_gold])
-	# шанс экипировки: одна вещь падает НА ЗЕМЛЮ у сундука — кто первый поднял
-	if randf() < 0.3:
-		var edrop := Items.roll_drop(enemy_level(), Net.players.get(opener, {}).get("luck", 0), randi(), true)
-		if not edrop.is_empty():
-			server_spawn_item_drop(edrop, c.x + randf_range(-1.0, 1.0), c.z + randf_range(-1.0, 1.0))
-	# лут: 2-3 предмета, В КООПЕРАТИВЕ ПОЛУЧАЮТ ВСЕ ИГРОКИ
-	var total := 0
-	for e in CHEST_LOOT:
-		total += e[1]
-	for i in randi_range(2, 3):
-		var roll := randi() % total
-		var type := "potion_hp"
-		for e in CHEST_LOOT:
-			roll -= e[1]
-			if roll < 0:
-				type = e[0]
-				break
-		if type == "crystal":
-			var keys := PICKUP_TYPES.keys()
-			type = keys[randi() % keys.size()]
-		for id in Net.players:
-			if type == "heal":
-				server_heal_player(id, 20)
-			elif type == "shield":
-				if server_hp.get(id, 0) > 0:
-					server_shield[id] = SHIELD_POINTS
-					Net.bcast("rpc_buff", [id, "shield", 999.0])
-			elif PICKUP_TYPES.has(type):
-				if server_hp.get(id, 0) > 0:
-					Net.bcast("rpc_buff", [id, type, PICKUP_TYPES[type].dur])
-			else:
-				_server_grant_item(id, type)
+	loot.server_open_chest(opener, cid)
 
 
-## Выдать расходник игроку (сервер): авторитетный инвентарь + синк владельцу.
-## Расходники стакаются по id; экипировка (оружие/тринкеты) идёт отдельными
-## слотами через _server_grant_equipment.
 func _server_grant_item(id: int, type: String) -> void:
-	var inv: Array = server_inv.get(id, [])
-	var stacked := false
-	for slot in inv:
-		if slot.get("kind", "") == "consumable" and slot.id == type:
-			slot.count += 1
-			stacked = true
-			break
-	if not stacked:
-		if inv.size() >= INV_SIZE:
-			Net.send_sys(id, "Инвентарь полон! %s пропал." % tr(ITEM_DEFS.get(type, {}).get("title", type)))
-			return
-		inv.append({"id": type, "kind": "consumable", "rarity": 0, "aseed": 0, "count": 1})
-	server_inv[id] = inv
-	Net.bcast("rpc_item_granted", [id, type])
-	_sync_inv(id)
+	loot.grant_item(id, type)
 
 
-## Выдать экипировку (сервер). false — инвентарь полон.
 func _server_grant_equipment(id: int, item: Dictionary) -> bool:
-	var inv: Array = server_inv.get(id, [])
-	if inv.size() >= INV_SIZE:
-		return false
-	inv.append(item)
-	server_inv[id] = inv
-	_sync_inv(id)
-	return true
+	return loot.grant_equipment(id, item)
 
 
-## Списать один расходник по id; false — если его нет.
-func _server_consume_item(id: int, type: String) -> bool:
-	var inv: Array = server_inv.get(id, [])
-	for i in inv.size():
-		if inv[i].get("kind", "") == "consumable" and inv[i].id == type:
-			inv[i].count -= 1
-			if inv[i].count <= 0:
-				inv.remove_at(i)
-			_sync_inv(id)
-			return true
-	return false
-
-
-## Синк авторитетного инвентаря/экипировки владельцу (и в Net.players — для сейва).
 func _sync_inv(id: int) -> void:
-	var inv: Array = server_inv.get(id, [])
-	var eq: Dictionary = server_equip.get(id, {"weapon": {}, "trinket": {}})
-	if Net.players.has(id):
-		Net.players[id]["inventory"] = inv.duplicate(true)
-		Net.players[id]["equipment"] = eq.duplicate(true)
-	if id == Net.my_id:
-		on_inv_sync(inv, eq)
-	else:
-		Net.rpc_id(id, "rpc_inv_sync", inv, eq)
+	loot.sync_inv(id)
 
 
 ## Клиент получил свой инвентарь/экипировку от сервера.
@@ -2291,61 +2123,16 @@ func _consumables() -> Array:
 	return out.slice(0, HOTBAR_SIZE)
 
 
-## Надеть предмет из инвентаря (сервер): слот по виду предмета, снятое — назад.
 func server_equip_item(id: int, inv_idx: int) -> void:
-	var inv: Array = server_inv.get(id, [])
-	if inv_idx < 0 or inv_idx >= inv.size():
-		return
-	var item: Dictionary = inv[inv_idx]
-	var slot := ""
-	match item.get("kind", ""):
-		"weapon": slot = "weapon"
-		"trinket": slot = "trinket"
-		_: return
-	var eq: Dictionary = server_equip.get(id, {"weapon": {}, "trinket": {}})
-	inv.remove_at(inv_idx)
-	var prev: Dictionary = eq.get(slot, {})
-	if not prev.is_empty():
-		inv.append(prev)
-	eq[slot] = item
-	server_inv[id] = inv
-	server_equip[id] = eq
-	_sync_inv(id)
-	_bcast_player_hp(id) # макс. здоровье могло измениться от аффиксов
-	if slot == "weapon":
-		Net.bcast("rpc_player_equip", [id, item.id])
+	loot.server_equip_item(id, inv_idx)
 
 
-## Снять предмет (сервер): слот -> инвентарь.
 func server_unequip(id: int, slot: String) -> void:
-	if not slot in ["weapon", "trinket"]:
-		return
-	var eq: Dictionary = server_equip.get(id, {"weapon": {}, "trinket": {}})
-	var item: Dictionary = eq.get(slot, {})
-	if item.is_empty():
-		return
-	var inv: Array = server_inv.get(id, [])
-	if inv.size() >= INV_SIZE:
-		Net.send_sys(id, "Инвентарь полон — снять некуда.")
-		return
-	inv.append(item)
-	eq[slot] = {}
-	server_inv[id] = inv
-	server_equip[id] = eq
-	_sync_inv(id)
-	_bcast_player_hp(id)
-	if slot == "weapon":
-		Net.bcast("rpc_player_equip", [id, "sword1h"])
+	loot.server_unequip(id, slot)
 
 
-## Выбросить предмет из инвентаря (сервер) — просто исчезает (M4: продажа).
 func server_drop_item(id: int, inv_idx: int) -> void:
-	var inv: Array = server_inv.get(id, [])
-	if inv_idx < 0 or inv_idx >= inv.size():
-		return
-	inv.remove_at(inv_idx)
-	server_inv[id] = inv
-	_sync_inv(id)
+	loot.server_drop_item(id, inv_idx)
 
 
 var _shot_cd: Dictionary = {}  # id -> время последнего выстрела (серверный лимит)
@@ -2431,12 +2218,8 @@ func _bcast_player_hp(id: int) -> void:
 		Net.bcast("rpc_player_hp", [id, server_hp[id], player_max_hp(id), "sync", pos.x, pos.z])
 
 
-## Дроп экипировки на землю (сервер): лежит, ждёт, кто первым подберёт.
 func server_spawn_item_drop(item: Dictionary, x: float, z: float) -> void:
-	if item.is_empty():
-		return
-	drop_seq += 1
-	Net.bcast("rpc_item_drop", [drop_seq, item, x, z])
+	loot.server_spawn_item_drop(item, x, z)
 
 
 func on_item_drop(did: int, item: Dictionary, x: float, z: float) -> void:
@@ -2468,27 +2251,6 @@ func on_item_drop_taken(did: int, taker: int) -> void:
 	if taker == Net.my_id:
 		Sfx.play("pickup")
 		hud.add_chat("", tr("+ %s (%s)") % [tr(Items.def_name(d.item)), tr(Items.RARITY_NAMES[clampi(int(d.item.get("rarity", 0)), 0, 3)])], true)
-
-
-func _update_item_drops(delta: float) -> void:
-	for did in item_drops.keys():
-		var d: Dictionary = item_drops[did]
-		d.life += delta
-		if is_instance_valid(d.node):
-			d.node.rotation.y += delta * 1.5
-		if not Net.is_server:
-			continue
-		if d.life < 0.8:
-			continue
-		for id in player_nodes:
-			if server_hp.get(id, 0) <= 0:
-				continue
-			if d.node.global_position.distance_to(player_nodes[id].global_position) < 1.6:
-				if _server_grant_equipment(id, d.item):
-					Net.bcast("rpc_item_drop_taken", [did, id])
-				break
-		if d.life > 60.0 and item_drops.has(did):
-			Net.bcast("rpc_item_drop_taken", [did, 0])
 
 
 func on_chest_opened(cid: int) -> void:
@@ -2564,35 +2326,7 @@ func use_item_slot(idx: int) -> void:
 
 
 func server_use_item(id: int, type: String, dx: float, dz: float) -> void:
-	var node = player_nodes.get(id)
-	if node == null or server_hp.get(id, 0) <= 0:
-		return
-	# предмет применяется, только если он реально есть в серверном инвентаре —
-	# защита от бесконечного использования модифицированным клиентом
-	if not _server_consume_item(id, type):
-		return
-	match type:
-		"potion_hp":
-			server_heal_player(id, 40)
-		"gold_feast":
-			# пир для всего отряда: живых лечит до отвала, павших поднимает
-			for pid in Net.players:
-				if server_hp.get(pid, 0) > 0:
-					server_heal_player(pid, 999)
-				elif not is_pvp() and player_nodes.has(pid):
-					revive_progress.erase(pid)
-					downed_timers.erase(pid)
-					server_hp[pid] = player_max_hp(pid) / 2
-					Net.bcast("rpc_player_revived", [pid, server_hp[pid]])
-		"potion_rage":
-			Net.bcast("rpc_buff", [id, "rage", PICKUP_TYPES["rage"].dur])
-		"potion_speed":
-			Net.bcast("rpc_buff", [id, "speed", PICKUP_TYPES["speed"].dur])
-		"bomb":
-			bomb_seq += 1
-			var from: Vector3 = node.global_position + Vector3(0, 1.3, 0)
-			var vel := Vector3(dx, 0, dz).normalized() * 9.0 + Vector3(0, 5.0, 0)
-			Net.bcast("rpc_bomb", [bomb_seq, from, vel])
+	loot.server_use_item(id, type, dx, dz)
 
 
 # ---------------------------------------------------------------------------
@@ -2747,8 +2481,8 @@ func _exit_tree() -> void:
 func _physics_process(delta: float) -> void:
 	_update_fireballs(delta)
 	_update_bombs(delta)
-	_update_pickups(delta)
-	_update_item_drops(delta)
+	loot.update_pickups(delta)
+	loot.update_item_drops(delta)
 	# автосейв героя раз в 30 секунд
 	_hero_save_timer -= delta
 	if _hero_save_timer <= 0:
