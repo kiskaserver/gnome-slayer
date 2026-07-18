@@ -28,24 +28,13 @@ var _hotbar_slots: Array = []
 var xp_fill: ColorRect
 var level_label: Label
 var quest_label: Label
-var dialog_panel: Panel
-var letterbox_top: ColorRect
-var letterbox_bottom: ColorRect
-var subtitle_label: Label
-var _letterbox_tween: Tween = null
-var dialog_speaker: Label
-var dialog_text: Label
-var _dialog_pages: Array = []
-var _dialog_page := 0
-var _dialog_advance := ""
 
-# --- "озвучка" репликами: буквы проступают постепенно под перестук-бип,
-# как в старых играх, вместо мгновенного текста или ИИ-голоса ---
-var _type_tween: Tween = null
-var _type_target: Label = null
-var _type_full := ""
-var _type_last_count := 0
-var _type_revealing := false
+# Панели вынесены в компоненты (scripts/ui/*): статы, инвентарь, лавка,
+# диалоги/катсцены. Hud держит ядро (полосы, чат, хотбар, баннеры) и делегаты.
+var stats_ui: HudStats
+var inv_ui: HudInventory
+var shop_ui: HudShop
+var dialog_ui: HudDialog
 
 signal dialog_closed(advance: String)
 signal stat_alloc(stat: String)
@@ -57,22 +46,7 @@ signal shop_buy(stock_idx: int)
 signal shop_sell(inv_idx: int)
 signal shop_closed
 
-var stats_panel: Panel
-var points_label: Label
-var _stat_rows: Dictionary = {}
 var _stats_points_hint: Label
-var _skill_rows: Dictionary = {}  # skill_id -> {"btn": Button, "line": ColorRect}
-
-var inv_panel: Panel = null
-var _inv_grid: GridContainer = null
-var _inv_equip_box: VBoxContainer = null
-var _inv_tip: Label = null
-
-var shop_panel: Panel = null
-var _shop_stock_box: VBoxContainer = null
-var _shop_sell_box: VBoxContainer = null
-var _shop_gold: Label = null
-var _shop_stock_cache: Array = []
 
 var _banner_tween: Tween
 var _combo_tween: Tween
@@ -84,6 +58,10 @@ signal chat_closed
 
 func _ready() -> void:
 	layer = 10
+	stats_ui = HudStats.new(self)
+	inv_ui = HudInventory.new(self)
+	shop_ui = HudShop.new(self)
+	dialog_ui = HudDialog.new(self)
 	# единая тема для панельных элементов HUD
 	var thm := UiTheme.get_theme()
 	for c in []:
@@ -164,34 +142,7 @@ func _ready() -> void:
 	center_label.text = ""
 	add_child(center_label)
 
-	# --- катсцена: чёрные полосы и субтитры (портал в конце главы) ---
-	letterbox_top = ColorRect.new()
-	letterbox_top.color = Color(0, 0, 0, 1.0)
-	letterbox_top.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	letterbox_top.offset_bottom = 0.0
-	letterbox_top.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(letterbox_top)
-
-	letterbox_bottom = ColorRect.new()
-	letterbox_bottom.color = Color(0, 0, 0, 1.0)
-	letterbox_bottom.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	letterbox_bottom.offset_top = 0.0
-	letterbox_bottom.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(letterbox_bottom)
-
-	subtitle_label = Label.new()
-	subtitle_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	subtitle_label.position = Vector2(-450, -140)
-	subtitle_label.size = Vector2(900, 90)
-	subtitle_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	subtitle_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	subtitle_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	subtitle_label.add_theme_font_size_override("font_size", 26)
-	subtitle_label.add_theme_color_override("font_color", Color(0.95, 0.93, 0.85))
-	subtitle_label.add_theme_constant_override("outline_size", 8)
-	subtitle_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
-	subtitle_label.modulate.a = 0.0
-	add_child(subtitle_label)
+	dialog_ui.build_cutscene_widgets()
 
 	# --- комбо ---
 	combo_label = Label.new()
@@ -294,31 +245,7 @@ func _ready() -> void:
 	quest_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.75))
 	add_child(quest_label)
 
-	# --- панель диалога ---
-	dialog_panel = Panel.new()
-	dialog_panel.theme = UiTheme.get_theme()
-	dialog_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	dialog_panel.position = Vector2(-360, -230)
-	dialog_panel.size = Vector2(720, 150)
-	dialog_panel.visible = false
-	add_child(dialog_panel)
-	dialog_speaker = Label.new()
-	dialog_speaker.position = Vector2(18, 10)
-	dialog_speaker.add_theme_font_size_override("font_size", 18)
-	dialog_speaker.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
-	dialog_panel.add_child(dialog_speaker)
-	dialog_text = Label.new()
-	dialog_text.position = Vector2(18, 42)
-	dialog_text.size = Vector2(684, 70)
-	dialog_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	dialog_text.add_theme_font_size_override("font_size", 17)
-	dialog_panel.add_child(dialog_text)
-	var dialog_hint := Label.new()
-	dialog_hint.position = Vector2(18, 118)
-	dialog_hint.add_theme_font_size_override("font_size", 13)
-	dialog_hint.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
-	dialog_hint.text = tr("[E / ЛКМ] — далее")
-	dialog_panel.add_child(dialog_hint)
+	dialog_ui.build_dialog_panel()
 
 	# --- полоса прогресса поднятия ---
 	revive_bar = ColorRect.new()
@@ -412,408 +339,78 @@ func _ready() -> void:
 	# все события мыши приходят в центр экрана — прямо в прицел; Control с
 	# фильтром STOP (по умолчанию у ColorRect) съедает их, ломая камеру и ЛКМ.
 	_ignore_mouse_recursive(self)
-	_build_stats_panel()
+	stats_ui.build()
 
 
-const STAT_DEFS := [
-	["str", "Сила", "+6% урона"],
-	["vit", "Живучесть", "+12 здоровья"],
-	["agi", "Ловкость", "+4% скорости, быстрее кувырок"],
-	["luck", "Удача", "+2% шанс крита"],
-]
-
-
-const COL_W := 170.0
-const COL_X := [20.0, 195.0, 370.0, 545.0]
-
-func _build_stats_panel() -> void:
-	stats_panel = Panel.new()
-	stats_panel.theme = UiTheme.get_theme()
-	stats_panel.set_anchors_preset(Control.PRESET_CENTER)
-	stats_panel.position = Vector2(-368, -260)
-	stats_panel.size = Vector2(736, 520)
-	stats_panel.visible = false
-	add_child(stats_panel)
-
-	var title := Label.new()
-	title.text = tr("ПЕРСОНАЖ")
-	title.position = Vector2(0, 14)
-	title.size = Vector2(736, 30)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 24)
-	title.add_theme_color_override("font_color", Color(0.95, 0.91, 0.78))
-	stats_panel.add_child(title)
-
-	points_label = Label.new()
-	points_label.position = Vector2(0, 50)
-	points_label.size = Vector2(736, 24)
-	points_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	points_label.add_theme_font_size_override("font_size", 17)
-	points_label.add_theme_color_override("font_color", Color(0.55, 1.0, 0.55))
-	stats_panel.add_child(points_label)
-
-	# --- дерево навыков: 4 колонки (str/vit/agi/luck), сверху корень-характеристика,
-	# ниже — тир 1 и тир 2, ветвящиеся друг из друга. Тонкая линия — связь узлов.
-	var root_y := 92.0
-	for i in STAT_DEFS.size():
-		var def: Array = STAT_DEFS[i]
-		var stat: String = def[0]
-		var cx: float = COL_X[i]
-
-		var name_l := Label.new()
-		name_l.text = tr(def[1])
-		name_l.position = Vector2(cx, root_y)
-		name_l.size = Vector2(COL_W - 50, 26)
-		name_l.add_theme_font_size_override("font_size", 18)
-		stats_panel.add_child(name_l)
-		var val_l := Label.new()
-		val_l.position = Vector2(cx, root_y + 24)
-		val_l.size = Vector2(COL_W - 50, 20)
-		val_l.add_theme_font_size_override("font_size", 15)
-		val_l.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
-		stats_panel.add_child(val_l)
-		var desc_l := Label.new()
-		desc_l.text = tr(def[2])
-		desc_l.position = Vector2(cx, root_y + 46)
-		desc_l.size = Vector2(COL_W, 32)
-		desc_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		desc_l.add_theme_font_size_override("font_size", 12)
-		desc_l.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
-		stats_panel.add_child(desc_l)
-		var btn := Button.new()
-		btn.text = "+"
-		btn.position = Vector2(cx + COL_W - 44, root_y)
-		btn.size = Vector2(40, 36)
-		btn.add_theme_font_size_override("font_size", 20)
-		stats_panel.add_child(btn)
-		btn.pressed.connect(func(): stat_alloc.emit(stat))
-		_stat_rows[stat] = {"val": val_l, "btn": btn}
-
-		# тир 1 и тир 2 того же дерева, найденные по branch/tier в общем списке
-		var tier_y := root_y + 92.0
-		for tier in [1, 2]:
-			var skill_id := ""
-			for sid in Skills.TREE:
-				var sdef: Dictionary = Skills.TREE[sid]
-				if sdef.branch == stat and sdef.tier == tier:
-					skill_id = sid
-					break
-			if skill_id == "":
-				continue
-			var sdef: Dictionary = Skills.TREE[skill_id]
-
-			var line := ColorRect.new()
-			line.color = Color(0.5, 0.45, 0.3, 0.6)
-			line.position = Vector2(cx + COL_W * 0.5 - 1, tier_y - 26)
-			line.size = Vector2(2, 26)
-			stats_panel.add_child(line)
-
-			var sbtn := Button.new()
-			sbtn.position = Vector2(cx, tier_y)
-			sbtn.size = Vector2(COL_W, 56)
-			sbtn.text = tr(sdef.name) + "\n" + tr(sdef.desc)
-			sbtn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			sbtn.add_theme_font_size_override("font_size", 12)
-			stats_panel.add_child(sbtn)
-			sbtn.pressed.connect(func(): skill_unlock.emit(skill_id))
-			_skill_rows[skill_id] = {"btn": sbtn}
-			tier_y += 76.0
-
-	var hint := Label.new()
-	hint.text = tr("[C / Esc] — закрыть")
-	hint.position = Vector2(0, 488)
-	hint.size = Vector2(736, 20)
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.add_theme_font_size_override("font_size", 13)
-	hint.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
-	stats_panel.add_child(hint)
+# ---------------------------------------------------------------------------
+# Делегаты панелей — реализация в scripts/ui/* (внешний API не менялся)
+# ---------------------------------------------------------------------------
+func toggle_stats(p: Dictionary) -> bool:
+	return stats_ui.toggle_stats(p)
 
 
 func refresh_stats(p: Dictionary) -> void:
-	var pts: int = p.get("points", 0)
-	points_label.text = tr("Свободных очков: %d") % pts
-	for stat in _stat_rows:
-		_stat_rows[stat].val.text = str(p.get(stat, 0))
-		_stat_rows[stat].btn.disabled = pts <= 0
-	for skill_id in _skill_rows:
-		var btn: Button = _skill_rows[skill_id].btn
-		if Skills.has(p, skill_id):
-			btn.disabled = true
-			btn.modulate = Color(0.55, 1.0, 0.65)
-		elif Skills.can_unlock(p, skill_id) and pts > 0:
-			btn.disabled = false
-			btn.modulate = Color(1, 1, 1)
-		else:
-			btn.disabled = true
-			btn.modulate = Color(0.6, 0.6, 0.6)
-
-
-func toggle_stats(p: Dictionary) -> bool:
-	stats_panel.visible = not stats_panel.visible
-	if stats_panel.visible:
-		refresh_stats(p)
-	return stats_panel.visible
+	stats_ui.refresh_stats(p)
 
 
 func is_stats_open() -> bool:
-	return stats_panel.visible
-
-
-# ---------------------------------------------------------------------------
-# Инвентарь и экипировка (клавиша I)
-# ---------------------------------------------------------------------------
-func _build_inv_panel() -> void:
-	inv_panel = Panel.new()
-	inv_panel.theme = UiTheme.get_theme()
-	inv_panel.set_anchors_preset(Control.PRESET_CENTER)
-	inv_panel.position = Vector2(-330, -250)
-	inv_panel.size = Vector2(660, 500)
-	inv_panel.visible = false
-	add_child(inv_panel)
-
-	var title := Label.new()
-	title.text = tr("ИНВЕНТАРЬ")
-	title.position = Vector2(20, 12)
-	title.add_theme_font_size_override("font_size", 24)
-	title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
-	inv_panel.add_child(title)
-
-	# слоты экипировки слева
-	_inv_equip_box = VBoxContainer.new()
-	_inv_equip_box.position = Vector2(20, 60)
-	_inv_equip_box.add_theme_constant_override("separation", 10)
-	inv_panel.add_child(_inv_equip_box)
-
-	# сетка предметов справа
-	_inv_grid = GridContainer.new()
-	_inv_grid.columns = 5
-	_inv_grid.position = Vector2(210, 60)
-	_inv_grid.add_theme_constant_override("h_separation", 8)
-	_inv_grid.add_theme_constant_override("v_separation", 8)
-	inv_panel.add_child(_inv_grid)
-
-	# тултип-строка внизу
-	_inv_tip = Label.new()
-	_inv_tip.position = Vector2(20, 440)
-	_inv_tip.size = Vector2(620, 50)
-	_inv_tip.add_theme_font_size_override("font_size", 14)
-	_inv_tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_inv_tip.add_theme_color_override("font_color", Color(0.85, 0.85, 0.8))
-	inv_panel.add_child(_inv_tip)
-
-	var hint := Label.new()
-	hint.text = tr("ЛКМ — надеть/использовать · ПКМ — выбросить")
-	hint.position = Vector2(20, 415)
-	hint.add_theme_font_size_override("font_size", 12)
-	hint.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
-	inv_panel.add_child(hint)
-
-
-func _item_tip_text(item: Dictionary) -> String:
-	if item.is_empty():
-		return ""
-	var rarity: int = clampi(int(item.get("rarity", 0)), 0, 3)
-	var s: String = tr(Items.def_name(item)) + " — " + tr(Items.RARITY_NAMES[rarity])
-	var af := Items.affix_text(item)
-	if af != "":
-		s += "  ·  " + af
-	if item.get("kind", "") == "weapon":
-		var cls: Dictionary = Items.WEAPONS.get(item.id, {})
-		if not cls.is_empty():
-			s += "  ·  " + tr("удар: %d/%d/%d") % [cls.combo[0].dmg, cls.combo[1].dmg, cls.combo[2].dmg]
-	return s
-
-
-func _inv_slot_button(item: Dictionary, label_when_empty: String) -> Button:
-	var btn := Button.new()
-	btn.custom_minimum_size = Vector2(80, 64)
-	btn.clip_text = true
-	if item.is_empty():
-		btn.text = label_when_empty
-		btn.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
-		btn.add_theme_font_size_override("font_size", 12)
-	else:
-		var rarity: int = clampi(int(item.get("rarity", 0)), 0, 3)
-		var cnt: int = int(item.get("count", 1))
-		btn.text = tr(Items.def_name(item)) + (" x%d" % cnt if cnt > 1 else "")
-		btn.add_theme_font_size_override("font_size", 12)
-		btn.add_theme_color_override("font_color", Items.RARITY_COLORS[rarity])
-		btn.mouse_entered.connect(func(): _inv_tip.text = _item_tip_text(item))
-	return btn
-
-
-func refresh_inventory(inv: Array, equip: Dictionary) -> void:
-	if inv_panel == null:
-		return
-	for c in _inv_grid.get_children():
-		c.queue_free()
-	for c in _inv_equip_box.get_children():
-		c.queue_free()
-	# экипировка
-	for slot in ["weapon", "trinket"]:
-		var cap := Label.new()
-		cap.text = tr("Оружие:") if slot == "weapon" else tr("Тринкет:")
-		cap.add_theme_font_size_override("font_size", 14)
-		cap.add_theme_color_override("font_color", Color(0.75, 0.8, 0.75))
-		_inv_equip_box.add_child(cap)
-		var item: Dictionary = equip.get(slot, {})
-		var btn := _inv_slot_button(item, tr("пусто"))
-		btn.custom_minimum_size = Vector2(170, 56)
-		_inv_equip_box.add_child(btn)
-		if not item.is_empty():
-			var s: String = slot
-			btn.pressed.connect(func(): inv_unequip.emit(s))
-	# сетка (20 ячеек)
-	for i in 20:
-		var item: Dictionary = inv[i] if i < inv.size() else {}
-		var btn := _inv_slot_button(item, "")
-		_inv_grid.add_child(btn)
-		if item.is_empty():
-			btn.disabled = true
-			btn.self_modulate = Color(1, 1, 1, 0.4)
-			continue
-		var idx := i
-		btn.pressed.connect(func(): inv_equip.emit(idx))
-		btn.gui_input.connect(func(ev: InputEvent):
-			if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_RIGHT:
-				inv_drop.emit(idx))
+	return stats_ui.is_stats_open()
 
 
 func toggle_inventory(inv: Array, equip: Dictionary) -> bool:
-	if inv_panel == null:
-		_build_inv_panel()
-	inv_panel.visible = not inv_panel.visible
-	if inv_panel.visible:
-		_inv_tip.text = ""
-		refresh_inventory(inv, equip)
-	return inv_panel.visible
+	return inv_ui.toggle_inventory(inv, equip)
+
+
+func refresh_inventory(inv: Array, equip: Dictionary) -> void:
+	inv_ui.refresh_inventory(inv, equip)
 
 
 func is_inventory_open() -> bool:
-	return inv_panel != null and inv_panel.visible
-
-
-# ---------------------------------------------------------------------------
-# Лавка торговца
-# ---------------------------------------------------------------------------
-func _build_shop_panel() -> void:
-	shop_panel = Panel.new()
-	shop_panel.theme = UiTheme.get_theme()
-	shop_panel.set_anchors_preset(Control.PRESET_CENTER)
-	shop_panel.position = Vector2(-360, -260)
-	shop_panel.size = Vector2(720, 520)
-	shop_panel.visible = false
-	add_child(shop_panel)
-
-	var title := Label.new()
-	title.text = tr("ЛАВКА КРАМСА")
-	title.position = Vector2(20, 12)
-	title.add_theme_font_size_override("font_size", 24)
-	title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
-	shop_panel.add_child(title)
-
-	_shop_gold = Label.new()
-	_shop_gold.position = Vector2(520, 16)
-	_shop_gold.add_theme_font_size_override("font_size", 18)
-	_shop_gold.add_theme_color_override("font_color", Color(1.0, 0.85, 0.35))
-	shop_panel.add_child(_shop_gold)
-
-	var cap_buy := Label.new()
-	cap_buy.text = tr("Товары:")
-	cap_buy.position = Vector2(20, 52)
-	cap_buy.add_theme_font_size_override("font_size", 15)
-	shop_panel.add_child(cap_buy)
-	var scroll_b := ScrollContainer.new()
-	scroll_b.position = Vector2(20, 78)
-	scroll_b.size = Vector2(330, 400)
-	shop_panel.add_child(scroll_b)
-	_shop_stock_box = VBoxContainer.new()
-	_shop_stock_box.add_theme_constant_override("separation", 6)
-	_shop_stock_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll_b.add_child(_shop_stock_box)
-
-	var cap_sell := Label.new()
-	cap_sell.text = tr("Твои трофеи (продажа):")
-	cap_sell.position = Vector2(370, 52)
-	cap_sell.add_theme_font_size_override("font_size", 15)
-	shop_panel.add_child(cap_sell)
-	var scroll_s := ScrollContainer.new()
-	scroll_s.position = Vector2(370, 78)
-	scroll_s.size = Vector2(330, 400)
-	shop_panel.add_child(scroll_s)
-	_shop_sell_box = VBoxContainer.new()
-	_shop_sell_box.add_theme_constant_override("separation", 6)
-	_shop_sell_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll_s.add_child(_shop_sell_box)
-
-
-func _shop_row(text: String, price_text: String, color: Color, cb: Callable) -> Control:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
-	var lbl := Label.new()
-	lbl.text = text
-	lbl.add_theme_font_size_override("font_size", 13)
-	lbl.add_theme_color_override("font_color", color)
-	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	lbl.custom_minimum_size = Vector2(200, 0)
-	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	row.add_child(lbl)
-	var btn := Button.new()
-	btn.text = price_text
-	btn.add_theme_font_size_override("font_size", 13)
-	btn.custom_minimum_size = Vector2(96, 34)
-	btn.pressed.connect(cb)
-	row.add_child(btn)
-	return row
+	return inv_ui.is_inventory_open()
 
 
 func open_shop(stock: Array, inv: Array, gold_now: int) -> void:
-	if shop_panel == null:
-		_build_shop_panel()
-	_shop_stock_cache = stock
-	shop_panel.visible = true
-	refresh_shop(inv, gold_now)
+	shop_ui.open_shop(stock, inv, gold_now)
 
 
 func refresh_shop(inv: Array, gold_now: int) -> void:
-	if shop_panel == null or not shop_panel.visible:
-		return
-	_shop_gold.text = tr("Золото: %d") % gold_now
-	for c in _shop_stock_box.get_children():
-		c.queue_free()
-	for c in _shop_sell_box.get_children():
-		c.queue_free()
-	for i in _shop_stock_cache.size():
-		var entry: Dictionary = _shop_stock_cache[i]
-		var item: Dictionary = entry.item
-		var rarity: int = clampi(int(item.get("rarity", 0)), 0, 3)
-		var name_txt: String = tr(Items.def_name(item))
-		if item.kind != "consumable":
-			name_txt += " (%s)" % tr(Items.RARITY_NAMES[rarity])
-			var af := Items.affix_text(item)
-			if af != "":
-				name_txt += "\n" + af
-		var idx := i
-		_shop_stock_box.add_child(_shop_row(name_txt, tr("%d з.") % entry.price,
-			Items.RARITY_COLORS[rarity], func(): shop_buy.emit(idx)))
-	for i in inv.size():
-		var item2: Dictionary = inv[i]
-		var rarity2: int = clampi(int(item2.get("rarity", 0)), 0, 3)
-		var cnt: int = int(item2.get("count", 1))
-		var txt: String = tr(Items.def_name(item2)) + (" x%d" % cnt if cnt > 1 else "")
-		var idx2 := i
-		_shop_sell_box.add_child(_shop_row(txt, tr("+%d з.") % Items.sell_price(item2),
-			Items.RARITY_COLORS[rarity2], func(): shop_sell.emit(idx2)))
+	shop_ui.refresh_shop(inv, gold_now)
 
 
 func close_shop() -> void:
-	if shop_panel != null:
-		shop_panel.visible = false
-	shop_closed.emit()
+	shop_ui.close_shop()
 
 
 func is_shop_open() -> bool:
-	return shop_panel != null and shop_panel.visible
+	return shop_ui.is_shop_open()
+
+
+func show_dialog(pages: Array, advance: String) -> void:
+	dialog_ui.show_dialog(pages, advance)
+
+
+func dialog_next() -> void:
+	dialog_ui.dialog_next()
+
+
+func close_dialog() -> void:
+	dialog_ui.close_dialog()
+
+
+func is_dialog_open() -> bool:
+	return dialog_ui.is_dialog_open()
+
+
+func cutscene_start() -> void:
+	dialog_ui.cutscene_start()
+
+
+func cutscene_end() -> void:
+	dialog_ui.cutscene_end()
+
+
+func cutscene_line(text: String) -> float:
+	return dialog_ui.cutscene_line(text)
 
 
 func set_stat_points(pts: int) -> void:
@@ -867,86 +464,6 @@ func set_xp(level: int, xp: int, xp_next: int) -> void:
 func set_quest_lines(lines: Array) -> void:
 	quest_label.text = "\n".join(lines)
 
-
-func show_dialog(pages: Array, advance: String) -> void:
-	_dialog_pages = pages
-	_dialog_page = 0
-	_dialog_advance = advance
-	dialog_panel.visible = true
-	_show_dialog_page()
-
-
-func _show_dialog_page() -> void:
-	var page: Array = _dialog_pages[_dialog_page]
-	dialog_speaker.text = tr(page[0])
-	_typewriter(dialog_text, tr(page[1]), 30.0)
-
-
-func dialog_next() -> void:
-	if _type_revealing:
-		_type_skip()
-		return
-	_dialog_page += 1
-	if _dialog_page >= _dialog_pages.size():
-		close_dialog()
-	else:
-		_show_dialog_page()
-
-
-## Постепенно проявляет text в label, играя короткий "бип" на части букв —
-## ретро-озвучка речи без синтеза голоса и без готовых голосовых файлов.
-## Возвращает длительность проявления в секундах.
-func _typewriter(label: Label, text: String, cps: float) -> float:
-	if _type_tween != null and _type_tween.is_valid():
-		_type_tween.kill()
-	_type_target = label
-	_type_full = text
-	_type_last_count = 0
-	_type_revealing = true
-	label.text = ""
-	if text.is_empty():
-		_type_revealing = false
-		return 0.0
-	var dur: float = maxf(text.length() / cps, 0.05)
-	_type_tween = create_tween()
-	_type_tween.tween_method(_type_reveal, 0.0, float(text.length()), dur)
-	_type_tween.tween_callback(func(): _type_revealing = false)
-	return dur
-
-
-func _type_reveal(n: float) -> void:
-	if _type_target == null:
-		return
-	var count := int(n)
-	if count == _type_last_count:
-		return
-	_type_target.text = _type_full.substr(0, count)
-	for i in range(_type_last_count, count):
-		if i % 2 == 0:
-			var ch := _type_full.unicode_at(i)
-			if ch != 32 and ch != 10 and ch != 9:
-				Sfx.play("blip", -9.0, randf_range(0.8, 1.3))
-				break
-	_type_last_count = count
-
-
-func _type_skip() -> void:
-	if _type_tween != null and _type_tween.is_valid():
-		_type_tween.kill()
-	if _type_target != null:
-		_type_target.text = _type_full
-	_type_revealing = false
-
-
-func close_dialog() -> void:
-	dialog_panel.visible = false
-	var adv := _dialog_advance
-	_dialog_advance = ""
-	dialog_closed.emit(adv)
-
-
-func is_dialog_open() -> bool:
-	return dialog_panel.visible
 
 
 func set_revive_progress(k: float) -> void:
@@ -1066,88 +583,6 @@ func banner(text: String, hold := 1.8) -> void:
 
 func center_msg(text: String) -> void:
 	center_label.text = text
-
-
-## Катсцена конца главы: чёрные полосы наезжают сверху/снизу, а весь игровой
-## интерфейс (полосы, счёт, бафы, квест-трекер, чат, хотбар...) скрывается
-## целиком — на экране только полосы и субтитры, ничего не отвлекает.
-func cutscene_start() -> void:
-	if _letterbox_tween != null and _letterbox_tween.is_valid():
-		_letterbox_tween.kill()
-	_letterbox_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	_letterbox_tween.tween_property(letterbox_top, "offset_bottom", 90.0, 0.6)
-	_letterbox_tween.tween_property(letterbox_bottom, "offset_top", -90.0, 0.6)
-	hp_back.get_parent().visible = false
-	xp_fill.get_parent().visible = false
-	kills_label.visible = false
-	wave_label.visible = false
-	hotbar.visible = false
-	score_box.visible = false
-	buffs_label.visible = false
-	quest_label.visible = false
-	level_label.visible = false
-	crosshair.visible = false
-	vignette.visible = false
-	chat_box.visible = false
-	sys_box.visible = false
-	talkers_label.visible = false
-	hint_label.visible = false
-	revive_bar.visible = false
-	chat_input.visible = false
-	center_label.text = ""    # чтобы «ты пал...» не висело поверх катсцены
-	banner_label.modulate.a = 0.0
-	# незакрытый диалог закрываем ПРАВИЛЬНО — иначе теряется незавершённая сдача
-	# квеста (dialog_closed → req_talk так и не отправится)
-	if dialog_panel.visible:
-		close_dialog()
-	stats_panel.visible = false
-
-
-func cutscene_end() -> void:
-	if _letterbox_tween != null and _letterbox_tween.is_valid():
-		_letterbox_tween.kill()
-	_letterbox_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
-	_letterbox_tween.tween_property(letterbox_top, "offset_bottom", 0.0, 0.5)
-	_letterbox_tween.tween_property(letterbox_bottom, "offset_top", 0.0, 0.5)
-	subtitle_label.modulate.a = 0.0
-	if _type_tween != null and _type_tween.is_valid() and _type_target == subtitle_label:
-		_type_tween.kill()
-		_type_revealing = false
-	hp_back.get_parent().visible = true
-	xp_fill.get_parent().visible = true
-	kills_label.visible = true
-	wave_label.visible = true
-	hotbar.visible = true
-	score_box.visible = true
-	buffs_label.visible = true
-	quest_label.visible = true
-	level_label.visible = true
-	crosshair.visible = true
-	vignette.visible = true
-	chat_box.visible = true
-	sys_box.visible = true
-	talkers_label.visible = true
-	hint_label.visible = true
-
-
-const SUBTITLE_REVEAL_CPS := 24.0  # скорость проступания букв — неспешно, "по-старому"
-const SUBTITLE_MIN_TIME := 3.0  # минимум на экране, даже для короткой строки
-const SUBTITLE_READ_CPS := 13.0  # темп дочитывания уже полностью проявленного текста
-
-
-## Показывает строку субтитров с плавным появлением/исчезновением; текст
-## проступает по буквам под тот же ретро-бип, что и в диалогах. Время на
-## экране считается от длины строки, чтобы длинную реплику успевали дочитать —
-## возвращает, сколько секунд катсцена должна подождать перед следующей строкой.
-func cutscene_line(text: String) -> float:
-	var reveal_dur := _typewriter(subtitle_label, text, SUBTITLE_REVEAL_CPS)
-	var total: float = maxf(SUBTITLE_MIN_TIME, text.length() / SUBTITLE_READ_CPS)
-	total = maxf(total, reveal_dur + 0.8)
-	var t := create_tween()
-	t.tween_property(subtitle_label, "modulate:a", 1.0, 0.3)
-	t.tween_interval(maxf(0.0, total - 0.3))
-	t.tween_property(subtitle_label, "modulate:a", 0.0, 0.4)
-	return total + 0.4
 
 
 func combo_flash(step: int) -> void:
