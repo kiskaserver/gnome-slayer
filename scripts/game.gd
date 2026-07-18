@@ -68,6 +68,7 @@ var portal_mode := "chapter"         # chapter | dungeon_exit
 var shop_svc: ShopService
 var poi_svc: PoiService
 var combat: CombatRules
+var spawn: SpawnDirector
 const SECOND_WIND_HP_FRAC := 0.25
 var _second_wind_used: Dictionary = {}  # id игрока -> уже сработало в этом матче
 var nav_region: NavigationRegion3D = null
@@ -217,6 +218,7 @@ func _ready() -> void:
 	shop_svc = ShopService.new(self)
 	poi_svc = PoiService.new(self)
 	combat = CombatRules.new(self)
+	spawn = SpawnDirector.new(self)
 	if _model_cache.is_empty():
 		for m in ["Knight", "Barbarian", "Mage", "Rogue_Hooded",
 				"Skeleton_Warrior", "Skeleton_Mage", "Skeleton_Minion", "Skeleton_Rogue",
@@ -302,7 +304,7 @@ func _ready() -> void:
 			else:
 				delay(2.0, func():
 					if not match_over:
-						_start_wave(1))
+						spawn.start_wave(1))
 
 
 func _apply_gfx_settings() -> void:
@@ -568,82 +570,18 @@ func on_voice(sender: int, data: PackedByteArray) -> void:
 
 
 # ---------------------------------------------------------------------------
-# Гномы
+# Гномы — спавн/волны в SpawnDirector (systems/spawn_director.gd)
 # ---------------------------------------------------------------------------
-## Уровень врагов: по главе кампании или волне выживания.
 func enemy_level() -> int:
-	if is_story():
-		return Net.campaign_chapter
-	if is_pvp():
-		return 2
-	return 1 + floori(maxi(wave - 1, 0) / 2.0)
-
-
-## Небольшой шанс, что обычный спавн окажется редким "золотым" гномом —
-## больше хп/урона, гарантированный жирный лут, своя ачивка за убийство.
-const ELITE_CHANCE := 0.07
-
-
-## Домики областей, рядом с которыми есть живые игроки (оверворлд): враги
-## лезут из нор там, где отряд, а не по всей огромной карте.
-func _active_houses() -> Array:
-	if world_areas.is_empty():
-		return houses
-	var out: Array = []
-	for house in houses:
-		var aid: String = house.get("area", "")
-		for area in world_areas:
-			if area.id != aid:
-				continue
-			for id in player_nodes:
-				if server_hp.get(id, 0) <= 0:
-					continue
-				var pp: Vector3 = player_nodes[id].global_position
-				if Vector2(pp.x - area.center.x, pp.z - area.center.z).length() < area.radius + 18.0:
-					out.append(house)
-					break
-			break
-	return out if not out.is_empty() else houses
+	return spawn.enemy_level()
 
 
 func server_spawn_gnome(type: String) -> void:
-	gnome_seq += 1
-	var px: float
-	var pz: float
-	var ex: float
-	var ez: float
-	if houses.is_empty():
-		# ПвП-арена: спавн у края, выход к центру
-		var sp: Vector3 = spawn_points[randi() % spawn_points.size()]
-		px = sp.x + randf_range(-1.5, 1.5)
-		pz = sp.z + randf_range(-1.5, 1.5)
-		ex = px * 0.85
-		ez = pz * 0.85
-	else:
-		var pool := _active_houses()
-		var house: Dictionary = pool[randi() % pool.size()]
-		px = house.x + house.dirx * 2.15
-		pz = house.z + house.dirz * 2.15
-		ex = house.x + house.dirx * 4.8 + randf_range(-1.2, 1.2)
-		ez = house.z + house.dirz * 4.8 + randf_range(-1.2, 1.2)
-	var is_elite: bool = not Gnome.TYPES[type].get("friendly", false) and not Gnome.TYPES[type].has("special") \
-		and not is_pvp() and enemy_level() >= 2 and randf() < ELITE_CHANCE
-	Net.bcast("rpc_gnome_spawn", [gnome_seq, type, px, pz, ex, ez, enemy_level(), is_elite])
-	if is_elite:
-		Net.bcast("rpc_banner", ["ЭЛИТНЫЙ ГНОМ ПОБЛИЗОСТИ!"])
-	match type:
-		"king", "frost_king":
-			Net.bcast("rpc_banner", ["КОРОЛЬ ГНОМОВ!"])
-		"skeleton_king":
-			Net.bcast("rpc_banner", ["КОРОЛЬ-ЛИЧ!"])
+	spawn.server_spawn_gnome(type)
 
 
-## Спавн в произвольной точке (не у домика) — например подкрепление, которое
-## босс поднимает из земли рядом с собой во время спецприёма, или элита с доски
-## объявлений.
 func server_spawn_gnome_at(type: String, pos: Vector3, lvl := 1, elite := false) -> void:
-	gnome_seq += 1
-	Net.bcast("rpc_gnome_spawn", [gnome_seq, type, pos.x, pos.z, pos.x, pos.z, lvl, elite])
+	spawn.server_spawn_gnome_at(type, pos, lvl, elite)
 
 
 func on_gnome_spawn(id: int, type: String, x: float, z: float, ex: float, ez: float, lvl: int = 1, is_elite: bool = false) -> void:
@@ -777,124 +715,6 @@ func server_alert_nearby(pos: Vector3, radius: float, source) -> void:
 			g.become_alerted(false)
 
 
-func _spread_slots(delta: float) -> void:
-	var circlers: Array = []
-	for g in gnomes.values():
-		if g.alive and (g.state == "circle" or g.state == "retreat"):
-			circlers.append(g)
-	var min_gap := TAU / maxf(3.0, circlers.size())
-	for i in circlers.size():
-		for j in range(i + 1, circlers.size()):
-			var a = circlers[i]
-			var b = circlers[j]
-			if a.target != b.target:
-				continue
-			var diff: float = angle_difference(b.slot_angle, a.slot_angle)
-			if absf(diff) < min_gap:
-				var push: float = (min_gap - absf(diff)) * delta * 1.5 * (1.0 if diff >= 0 else -1.0)
-				a.slot_angle += push
-				b.slot_angle -= push
-
-
-# ---------------------------------------------------------------------------
-# Волны (сервер)
-# ---------------------------------------------------------------------------
-func _wave_composition(w: int) -> Array:
-	var roles: Dictionary = BIOME_ENEMIES.get(Net.biome, BIOME_ENEMIES["meadow"])
-	var k: float = diff().count
-	var list: Array = []
-	for i in maxi(1, roundi((1 + ceili(w * 0.7)) * k)):
-		list.append(roles.melee)
-	for i in roundi(maxi(0, w - 1) * k):
-		list.append(roles.fast)
-	for i in roundi(floori(w / 2.0) * k):
-		list.append(roles.caster)
-	# рой миньонов многочисленнее обычных «быстрых»
-	if roles.fast == "skeleton_minion":
-		for i in mini(w, 5):
-			list.append(roles.fast)
-	list.shuffle()
-	list = list.slice(0, 18)
-	if w % FINAL_WAVE == 0:
-		list.append(roles.boss)
-	return list
-
-
-func _start_wave(w: int) -> void:
-	wave = w
-	spawn_queue = _wave_composition(w)
-	spawn_timer = 0.5
-	wave_cleared = false
-	max_attackers = maxi(1, 2 + floori(w / 3.0) + maxi(0, Net.players.size() - 1) + int(diff().tokens))
-	for id in server_hp:
-		if server_hp[id] <= 0:
-			# павшие встают с новой волной, но лишь с половиной здоровья
-			server_hp[id] = player_max_hp(id) / 2
-			var pos := _player_spawn_pos()
-			Net.bcast("rpc_player_respawn", [id, pos.x, pos.y])
-			Net.bcast("rpc_player_hp", [id, server_hp[id], player_max_hp(id), "heal", pos.x, pos.y])
-	revive_progress.clear()
-	# каждые 2 волны — новый сундук
-	chest_wave_counter += 1
-	if chest_wave_counter >= 2:
-		chest_wave_counter = 0
-		_server_place_chests(1)
-	Net.bcast("rpc_wave", [w, endless, false])
-
-
-func _update_waves_pve(delta: float) -> void:
-	if not spawn_queue.is_empty():
-		spawn_timer -= delta
-		if spawn_timer <= 0:
-			spawn_timer = randf_range(0.5, 1.0)
-			server_spawn_gnome(spawn_queue.pop_front())
-		return
-	if wave == 0:
-		return
-	var alive := 0
-	for g in gnomes.values():
-		if g.alive:
-			alive += 1
-	if alive > 0:
-		wave_down = 0.0
-		return
-	if not wave_cleared:
-		wave_cleared = true
-		wave_down = 0.0
-		if not endless and wave >= FINAL_WAVE:
-			_server_game_over(true, "ПОБЕДА! Племя гномов разбито!")
-			return
-		Net.bcast("rpc_banner", ["ВОЛНА ЗАЧИЩЕНА"])
-		for id in server_hp:
-			server_heal_player(id, 15)
-	wave_down += delta
-	if wave_down > 3.0:
-		_start_wave(wave + 1)
-
-
-func _update_pvp(delta: float) -> void:
-	pvp_trickle -= delta
-	if pvp_trickle <= 0:
-		pvp_trickle = 12.0
-		var alive := 0
-		for g in gnomes.values():
-			if g.alive:
-				alive += 1
-		if alive < 4:
-			var roles: Dictionary = BIOME_ENEMIES.get(Net.biome, BIOME_ENEMIES["meadow"])
-			var types := [roles.melee, roles.fast, roles.caster]
-			for i in 2:
-				server_spawn_gnome(types[randi() % 3])
-	for id in respawn_timers.keys():
-		respawn_timers[id] -= delta
-		if respawn_timers[id] <= 0:
-			respawn_timers.erase(id)
-			if server_hp.has(id):
-				server_hp[id] = player_max_hp(id)
-				var pos := _player_spawn_pos()
-				Net.bcast("rpc_player_respawn", [id, pos.x, pos.y])
-
-
 const BLEEDOUT_TIME := 40.0
 var downed_timers: Dictionary = {}
 
@@ -938,13 +758,13 @@ func _server_restart_match() -> void:
 	else:
 		wave = 0
 		endless = false
-		_start_wave(1)
+		spawn.start_wave(1)
 
 
 func server_continue_endless() -> void:
 	endless = true
 	match_over = false
-	_start_wave(wave + 1)
+	spawn.start_wave(wave + 1)
 
 
 func server_restart_single() -> void:
@@ -967,7 +787,7 @@ func server_restart_single() -> void:
 	wave = 0
 	delay(1.5, func():
 		if not match_over:
-			_start_wave(1))
+			spawn.start_wave(1))
 
 
 func on_match_reset() -> void:
@@ -2938,7 +2758,7 @@ func _physics_process(delta: float) -> void:
 	if not Net.is_server:
 		return
 
-	_spread_slots(delta)
+	spawn.spread_slots(delta)
 	combat.update_revives(delta)
 
 	if restart_timer > 0:
@@ -2951,11 +2771,11 @@ func _physics_process(delta: float) -> void:
 		return
 
 	if is_pvp():
-		_update_pvp(delta)
+		spawn.update_pvp(delta)
 	elif is_story():
 		_update_story(delta)
 	else:
-		_update_waves_pve(delta)
+		spawn.update_waves_pve(delta)
 
 	if Net.mode == Net.Mode.HOST:
 		_time_sync -= delta
