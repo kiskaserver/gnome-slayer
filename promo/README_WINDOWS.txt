@@ -1,5 +1,10 @@
-GNOMOBOY — Shards of the Mountain Heart (v4.1)
+GNOMOBOY — Shards of the Mountain Heart (v4.1.1)
 ======================================
+
+Patch 4.1.1 (level-design fixes):
+  - Gates are open now (were showing closed doors across the road)
+  - Lanterns stand beside the road facing it, not on the paths
+  - Buildings and props no longer overlap or clip into each other
 
 What's new in 4.1:
   - Crossbow weapon class: a ranged path — aim with the camera, the server
