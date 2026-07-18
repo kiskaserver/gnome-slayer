@@ -238,11 +238,11 @@ const ENDINGS := {
 # Сложность: количество врагов и их «интеллект»
 const DIFFICULTIES := {
 	"easy": {"title": "Легко", "count": 0.6, "sight": 13.0, "tokens": -1,
-		"dodge": 0.25, "heal_cd": 10.0, "cd": 1.35, "dmg": 0.8, "story_pop": 5},
+		"dodge": 0.25, "heal_cd": 10.0, "cd": 1.35, "dmg": 0.8, "story_pop": 5, "stam": 0.6},
 	"normal": {"title": "Нормально", "count": 1.0, "sight": 17.0, "tokens": 0,
-		"dodge": 0.6, "heal_cd": 7.0, "cd": 1.0, "dmg": 1.0, "story_pop": 8},
+		"dodge": 0.6, "heal_cd": 7.0, "cd": 1.0, "dmg": 1.0, "story_pop": 8, "stam": 1.0},
 	"hard": {"title": "Сложно", "count": 1.35, "sight": 20.0, "tokens": 1,
-		"dodge": 0.85, "heal_cd": 5.0, "cd": 0.8, "dmg": 1.2, "story_pop": 12},
+		"dodge": 0.85, "heal_cd": 5.0, "cd": 0.8, "dmg": 1.2, "story_pop": 12, "stam": 1.15},
 }
 
 const XP_SIDE_REWARD := 150

@@ -55,6 +55,12 @@ func local_sim(delta: float) -> void:
 		send_state(delta)
 		return
 
+	# стамина: восстановление в покое (после короткой паузы от последней траты)
+	p.stam_regen_delay = maxf(0, p.stam_regen_delay - delta)
+	if p.stam_regen_delay <= 0 and p.stamina < p.STAM_MAX:
+		p.stamina = minf(p.STAM_MAX, p.stamina + p.STAM_REGEN * delta)
+		p.game.hud.set_stamina(p.stamina / p.STAM_MAX)
+
 	var input_captured: bool = not p.game.ui_blocked
 	var iv := Input.get_vector("move_left", "move_right", "move_forward", "move_back") if input_captured else Vector2.ZERO
 	var cam_basis: Basis = p.cam_yaw.global_transform.basis
@@ -62,7 +68,8 @@ func local_sim(delta: float) -> void:
 	var moving: bool = p._move_dir.length_squared() > 0.01
 	if moving:
 		p._move_dir = p._move_dir.normalized()
-	var running: bool = Input.is_action_pressed("run") and input_captured
+	# пустая стамина глушит спринт — герой переходит на шаг
+	var running: bool = Input.is_action_pressed("run") and input_captured and p.stamina > 1.0
 	var want_block: bool = Input.is_action_pressed("block") and input_captured
 
 	var speed_mul := 1.0
@@ -184,6 +191,8 @@ func local_sim(delta: float) -> void:
 	# перемещение
 	if p.state != "dodge":
 		if moving and speed_mul > 0:
+			if running:
+				p.drain_stamina(p.STAM_SPRINT * delta) # спринт жжёт стамину
 			var buff_speed := 1.35 if p.has_buff("speed") else 1.0
 			var stat_speed: float = Quests.speed_mult_for(Net.players.get(Net.my_id, {})) \
 				* Items.equip_speed_mult(p.game.my_equip) if p.is_local else 1.0

@@ -65,6 +65,10 @@ func try_dodge() -> void:
 		return
 	if p.state == "attack" and p.state_time < p.attack_dur * 0.5:
 		return
+	if p.is_local and p.stamina < p.STAM_DODGE:
+		return # выдохся — на кувырок не хватает
+	if p.is_local:
+		p.drain_stamina(p.STAM_DODGE)
 	p.state = "dodge"
 	p.state_time = 0.0
 	p.iframes = 0.45

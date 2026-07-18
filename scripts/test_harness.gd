@@ -20,6 +20,7 @@ var _tod_override := -1.0
 var _test_paused := false
 var _pause_snapshot := {}
 var _start_chapter := 1 # --chapter=N: сюжетный прогон с главы N (компоновка поздних глав)
+var _test_stam_checked := false
 
 var game: Game:
 	get:
@@ -663,6 +664,28 @@ func tick(delta: float) -> void:
 			else:
 				print("[TEST] crossbow: target spawn FAIL")
 			get_tree().quit()
+
+	# стамина (D1): перекид тратит; пустая — блокирует перекид; покой восстанавливает
+	if _test_mode == "single" and not _test_stam_checked and _test_timer > 19.0 and game != null:
+		_test_stam_checked = true
+		var me_s: PlayerChar = game.player_nodes.get(Net.my_id)
+		if me_s != null and me_s.state in ["idle", "block"]:
+			var s0: float = me_s.stamina
+			me_s.dodge_cooldown = 0.0
+			me_s.try_dodge()
+			var drained: bool = me_s.stamina < s0
+			me_s.state = "idle"
+			me_s.dodge_cooldown = 0.0
+			me_s.stamina = 0.0
+			me_s.try_dodge()
+			var blocked: bool = me_s.state != "dodge"
+			me_s.stam_regen_delay = 0.0
+			get_tree().create_timer(1.0).timeout.connect(func():
+				print("[TEST] stamina: drain=%s blocked_at_zero=%s regen=%.0f PASS=%s" % [
+					str(drained), str(blocked), me_s.stamina,
+					str(drained and blocked and me_s.stamina > 5.0)]))
+		else:
+			print("[TEST] stamina: SKIP (player busy: %s)" % (me_s.state if me_s != null else "null"))
 
 	# тест паузы: в одиночке мир должен замирать
 	if _test_mode == "single" and not _test_paused and _test_timer > 7.0 and game != null:

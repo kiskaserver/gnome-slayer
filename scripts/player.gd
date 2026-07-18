@@ -50,6 +50,25 @@ var dodge_cooldown := 0.0
 var iframes := 0.0
 var blocking := false
 
+# стамина (D1): бег и перекид тратят, покой восстанавливает; пустая —
+# блокирует спринт и перекид. Чисто локальный ресурс (движение и так
+# клиентское), сервер её не проверяет.
+const STAM_MAX := 100.0
+const STAM_DODGE := 22.0
+const STAM_SPRINT := 10.0  # в секунду
+const STAM_REGEN := 20.0   # в секунду, после паузы
+var stamina := STAM_MAX
+var stam_regen_delay := 0.0
+
+
+## Потратить стамину (с множителем сложности); false — если она иссякла.
+func drain_stamina(amount: float) -> bool:
+	stamina = maxf(0.0, stamina - amount * float(game.diff().get("stam", 1.0)))
+	stam_regen_delay = 0.7
+	if is_local:
+		game.hud.set_stamina(stamina / STAM_MAX)
+	return stamina > 0.0
+
 # бафы: тип -> оставшееся время
 var buffs: Dictionary = {}
 

@@ -4,6 +4,8 @@ extends CanvasLayer
 
 var hp_fill: ColorRect
 var hp_back: ColorRect
+var stam_back: ColorRect
+var stam_fill: ColorRect
 var kills_label: Label
 var wave_label: Label
 var banner_label: Label
@@ -90,6 +92,18 @@ func _ready() -> void:
 	hp_fill.position = Vector2(2, 2)
 	hp_fill.size = Vector2(316, 14)
 	hp_back.add_child(hp_fill)
+
+	# --- стамина (D1): тонкая полоса под здоровьем — бег и перекид тратят её ---
+	stam_back = ColorRect.new()
+	stam_back.color = Color(0.06, 0.05, 0.05, 0.7)
+	stam_back.position = Vector2(0, 43)
+	stam_back.size = Vector2(320, 10)
+	hp_wrap.add_child(stam_back)
+	stam_fill = ColorRect.new()
+	stam_fill.color = Color(0.95, 0.85, 0.35)
+	stam_fill.position = Vector2(1, 1)
+	stam_fill.size = Vector2(318, 8)
+	stam_back.add_child(stam_fill)
 
 	# --- счёт справа сверху ---
 	kills_label = Label.new()
@@ -547,6 +561,13 @@ func _ignore_mouse_recursive(node: Node) -> void:
 		node.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	for c in node.get_children():
 		_ignore_mouse_recursive(c)
+
+
+## Полоса стамины: k в [0..1]; при истощении подсвечивается тревожным.
+func set_stamina(k: float) -> void:
+	k = clampf(k, 0.0, 1.0)
+	stam_fill.size.x = 318.0 * k
+	stam_fill.color = Color(0.95, 0.85, 0.35) if k > 0.25 else Color(1.0, 0.5, 0.2)
 
 
 func set_hp(hp: int, max_hp: int) -> void:
