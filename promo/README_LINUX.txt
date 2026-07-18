@@ -1,6 +1,35 @@
-GNOMOBOY — Shards of the Mountain Heart (v4.2.0)
+GNOMOBOY — Shards of the Mountain Heart (v4.3.0)
 ======================================
 
+What's new in 4.3 — the Craft of War Update:
+  - Interactive tutorial on your first singleplayer campaign: nine guided
+    steps (movement, sprint, combo, block & roll, chest, inventory,
+    character sheet, belt items, and following a golden waypoint beacon
+    to the elder). Skippable from the pause menu, replayable from the
+    game menu; every step waits for the real action
+  - Stamina: sprinting and dodge rolls drain the yellow bar under your
+    health; it refills when you ease off. An empty bar drops sprint to a
+    walk and blocks the roll (softer drain on Easy, harsher on Hard)
+  - Parry: raise your block in the last moment before a hit to deflect
+    it completely — the attacker staggers wide open for a finisher, and
+    you get a burst of stamina back
+  - Charged heavy attack: hold LMB out of combat to wind up, release to
+    strike at 1.7x damage with a wider arc (costs stamina)
+  - Explosive barrels: red-marked kegs scattered around battlefields,
+    war camps and dungeon rooms — strike or bomb them for an area blast
+    that hurts everyone and chain-detonates nearby barrels
+  - The overworld is reforged: tighter map (radius 120 -> 80) with the
+    dead space cut out, every area now has a real composed core (market
+    stalls in the settlement, a broken shieldwall with planted swords on
+    the battlefield, a graveyard approach to the crypt...), hidden
+    road-side cache trails with chests, and chapter-specific area types:
+    autumn brings a gnome war camp with an elite mini-boss, winter a
+    fortified outpost, night a fenced cemetery
+  - Dungeons got three themes by chapter: crypt (stone halls), cave
+    (ragged caverns with glowing mushrooms), catacombs (a dense maze) —
+    plus loop corridors, a secret room behind a cracked wall, a gated
+    boss hall whose key is held by an elite mini-boss, a trophy alcove
+    where you pick ONE of two rewards, and fire braziers among the traps
 What's new in 4.2:
   - Localization fixes: shop consumables, PvP victory banner, mouse-button
     names, hotbar codes are now translated in all three languages
@@ -104,12 +133,16 @@ if it's missing, the game simply runs without Discord status.
 
 Controls:
   WASD        — movement
-  LMB / RMB   — attack / block
-  Space       — roll
-  E           — revive fallen friend / talk to NPC / open chest
+  Shift       — sprint (drains stamina)
+  LMB         — attack (hold out of combat to charge a heavy strike)
+  RMB (hold)  — block (raise it at the last moment to parry)
+  Space       — roll (costs stamina)
+  E           — revive fallen friend / talk to NPC / open chest / interact
+  I           — inventory & equipment
+  C           — hero stats (leveling up) & skill tree
+  1-5         — belt items
   V (hold)    — voice chat
   T           — text chat
-  C           — hero stats (leveling up)
   ESC         — pause / settings
 
 Multiplayer: "Multiplayer" -> host opens port 7788 (UDP), or everyone

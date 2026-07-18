@@ -59,8 +59,9 @@ WASD — move · LMB/RMB — attack/block · Space — roll · E — interact ·
 - Visibility: сначала **Draft**, проверить страницу, потом Public
 
 ## Uploads
-- `Gnomoboy-4.2.0-Windows.zip` — отметить платформу **Windows**
-- `Gnomoboy-4.2.0-Linux.tar.gz` — отметить платформу **Linux**
+- `Gnomoboy-4.3.0-Windows.zip` — отметить платформу **Windows**
+- `Gnomoboy-4.3.0-Windows-Portable.zip` — отметить платформу **Windows** (portable: сейвы рядом с exe)
+- `Gnomoboy-4.3.0-Linux.tar.gz` — отметить платформу **Linux**
 
 ## Картинки
 - Cover: `cover_630x500.png` (GNOME SLAYER)

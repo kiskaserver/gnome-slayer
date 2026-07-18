@@ -39,8 +39,11 @@ A co-op 3D action game built with **Godot 4.7**: you are a knight facing hordes 
 - **Cinematic cutscenes** between chapters: letterboxed multi-shot camera work, subtitle timing that scales with line length, HUD fully hidden.
 - **Day/night cycle** — a full day in 8 minutes with sunrises, golden sunsets, a starry sky and a cratered moon; house windows light up at dusk; time is synchronized between players.
 - **4 biomes** with unique enemy rosters: meadow, winter forest, autumn forest, night graveyard.
-- **Journey overworld** (story): a 120-radius multi-area world — camp, settlement, battlefield, grove and the dungeon approach — connected by a path-tile road with fence gates; campfires serve as respawn checkpoints; enemies are leashed to their home areas.
-- **Procedural crypt dungeons**: rooms + corridors from the Dungeon Remastered kit, torch-lit, with spike traps, loot rooms and a boss hall; the whole party descends together and portals back after claiming the shard.
+- **Journey overworld** (story): a compact, dense multi-area world — camp, settlement, and a graveyard approach to the crypt, linked by a path-tile road with fence gates and hidden road-side **cache trails**. Every area has a composed "core" (market stalls and barrels in the settlement, a broken shieldwall with planted swords on the battlefield, grave rows before the crypt), and the middle areas **change with the chapter**: a gnome war camp with an elite mini-boss in autumn, a fortified outpost in winter, a fenced cemetery at night. Campfires serve as respawn checkpoints; enemies are leashed to their home areas.
+- **Procedural dungeons in three themes** by chapter: **crypt** (stone halls and torches), **cave** (ragged caverns, rock piles, glowing mushrooms) and **catacombs** (a dense maze of small rooms). Loop corridors, spike traps and fire braziers, a **secret room** behind a cracked wall you pry open, a **gated boss hall** — the key is held by an elite mini-boss — and a trophy alcove after the boss where you pick **one of two rewards** (the other crumbles). The whole party descends together and portals back after claiming the shard.
+- **Stamina, parry and heavy attacks**: sprint and dodge rolls drain a stamina bar; a last-moment block **parries** the hit outright and staggers the attacker for a finisher; holding LMB out of combat charges a wide **heavy strike**.
+- **Explosive barrels** scattered around battlefields, war camps and dungeons — one hit sets off an area blast that hurts both sides and chain-detonates neighbours.
+- **Interactive tutorial** on the first singleplayer campaign: nine action-gated steps guided by hints and a golden waypoint beacon; skippable from pause, replayable from the menu.
 - **Full inventory & equipment** (I key): 20-slot grid, weapon + trinket slots, 6 weapon classes incl. a ranged crossbow (sword&shield, axe&shield, dagger, two-handed sword, battle axe, crossbow), 4 rarity tiers with deterministic affixes — forged saves can't fake stats.
 - **Merchant at camp**: seed-rolled stock per chapter, buy gear/potions, sell loot for squad gold.
 - **8 kinds of interactive points of interest**, spread across overworld areas.
@@ -59,10 +62,10 @@ All bindings are remappable in Settings.
 |---|---|
 | W A S D | Move |
 | Mouse | Camera |
-| LMB | Attack (3-hit combo) |
-| RMB (hold) | Shield block |
-| Space | Dodge roll (i-frames) |
-| Shift | Sprint |
+| LMB | Attack (3-hit combo); hold out of combat to charge a heavy strike |
+| RMB (hold) | Shield block; raising it at the last moment parries the hit |
+| Space | Dodge roll (i-frames, costs stamina) |
+| Shift | Sprint (drains stamina) |
 | E (hold) | Revive a downed friend / interact |
 | V (hold) | Voice chat |
 | T | Text chat |
@@ -133,6 +136,10 @@ Lore fragments are deterministic per seed, tracked per profile (24 total), and r
 ## Combat
 
 - 3-hit melee combos, shield blocking (directional), dodge rolls with i-frames, temporary buffs (rage, speed, barrier, greatsword).
+- **Stamina**: sprint (10/s) and rolls (22) spend it, rest restores it; an empty bar drops you to a walk and blocks the roll. Tuned per difficulty (gentler on Easy).
+- **Parry**: block raised within 0.25 s before a hit deflects it completely, refunds stamina and staggers the attacker wide open — flowing straight into the finisher.
+- **Charged heavy attack**: hold LMB out of combat to wind up; release for a 1.7× strike with a wider arc (25 stamina).
+- **Explosive barrels**: melee hits and bombs detonate them — 25/35 area damage to players/gnomes, kill credit to whoever struck the barrel, chain reactions included.
 - **Elite gnomes** — a rare (~7%) golden variant: 1.8× HP, +35% damage, a golden glow, guaranteed rich loot, its own achievement.
 - **Finisher** — hitting a staggered enemy deals 40% bonus damage.
 - **Bosses have unique special attacks**: ground slam (AoE), charge, summoning adds — telegraphed with a wind-up so you can dodge.
@@ -145,6 +152,7 @@ Lore fragments are deterministic per seed, tracked per profile (24 total), and r
 Download the packaged builds from itch.io, or after building from source:
 
 - **Windows:** run `build/Gnomoboy.exe`.
+- **Windows (portable):** the `-Windows-Portable` archive keeps saves and settings in a `data_...` folder **next to the exe** (Godot self-contained mode via the bundled `_sc_` file) — unzip to a USB stick and carry your progress with you.
 - **Linux:**
   ```bash
   chmod +x Gnomoboy.x86_64
@@ -178,12 +186,21 @@ Set-AuthenticodeSignature -FilePath build\Gnomoboy.exe -Certificate <cert> -Time
 The game has a headless test harness — no window, no manual clicking:
 
 ```bash
-# PvE smoke test: spawns, input, pause, chests, items, kills, corpses
+# PvE smoke test: spawns, input, pause, chests, items, kills, corpses,
+# stamina, parry, heavy attack
 godot --headless --path . -- --test
 
-# Story test: full chapter loop — quests, hiring, safe zone, boss, shard,
-# portal, chapter transition, saves, stats, POI interactions, elite/finisher
+# Story test: full chapter loop — quests, hiring, safe zone, dungeon with
+# secret room / key gate / reward choice, portal, chapter transition, saves,
+# stats, POI interactions, elite/finisher, barrels, overworld connectivity
+# and density checks
 godot --headless --path . -- --test-story
+
+# Generation-only check of a later chapter's overworld and dungeon theme
+godot --headless --path . -- --test-story --chapter=3
+
+# Tutorial: scripted walkthrough of all nine steps + the saved flag
+godot --headless --path . -- --test-tutorial
 
 # Multiplayer: run in two terminals
 godot --headless --path . -- --mphost
@@ -208,18 +225,32 @@ Tests print `[TEST] ... PASS=true/false` lines to stdout. Test saves are written
 project.godot            Godot project config (autoloads, display, locale)
 main.tscn                Single scene; everything else is built in code
 scripts/
-  main.gd                Menu, settings UI, test harness, cmdline handling
-  game.gd                Match orchestration: server logic, RPCs, waves, story
-  net.gd                 Networking: ENet setup, RPC definitions, version check
-  player.gd              Player character: input, combat, animation, camera
-  gnome.gd               Enemy/ally AI: state machine, specials, ragdolls
+  main.gd                Entry point: routing, overlays, keybind capture
+  game.gd                Match orchestration: world setup, client handlers, fx
+  net.gd                 Networking: RPC surface, handshake, version check
+  net_session.gd         Session lifecycle: host/join/single, Discord secrets
+  player.gd              Player node: input, model/weapons, buffs, hp events
+  player_combat.gd       Attacks, combos, parry-ready dodging, heavy strikes
+  player_locomotion.gd   Local sim, camera, hints, state replication
+  gnome.gd               Enemy/ally node: setup, ally leveling, net sync
+  gnome_ai.gd            Server AI: states, senses, boss specials, movement
+  gnome_visual.gd        Models, materials, elite glow, events, ragdolls
+  tutorial.gd            Interactive tutorial: action-gated steps, waypoint
+  test_harness.gd        Headless test modes (--test*, --mp*, --screenshot)
+  world_gen.gd           Worldgen facade (constants, biomes, delegates)
+  worldgen/              Static libs: overworld, area cores, POIs, geometry,
+                         environment, arena, primitives
+  world_dungeon.gd       Dungeon generator: 3 themes, secrets, key gate
+  systems/               Server services owned by Game: combat rules, spawns,
+                         loot, quests, camp, zones, shop, POIs
+  ui/                    Menu builder, settings tabs, HUD panels (inventory,
+                         stats, shop, dialogs)
   npc.gd                 Camp NPCs and dialogue hooks
-  world_gen.gd           Procedural arena generation, POIs, biomes
   quests.gd              Campaign data: chapters, dialogues, lore, multipliers
   skills.gd              Skill tree definitions and stat multipliers
   achievements.gd        Achievement definitions, unlock tracking (autoload)
-  savegame.gd            Save slots, hero persistence (autoload)
-  hud.gd                 In-game UI: bars, chat, dialogs, cutscene letterbox
+  savegame.gd            Save slots, hero persistence, tutorial flag (autoload)
+  hud.gd                 In-game UI core: bars, chat, banners, tutorial line
   settings.gd            Persistent settings + keybinds (autoload)
   sfx.gd / music.gd      Pooled sound playback / generative music (autoloads)
   voice.gd               Voice chat capture/playback (autoload)
@@ -230,7 +261,8 @@ locale/translations.csv  All strings: keys, Russian, Ukrainian, English
 models/                  CC0 glTF assets (KayKit packs)
 assets/sfx, assets/music Procedurally generated WAV files
 shaders/sky.gdshader     Sky shader (day/night, stars, moon)
-promo/                   Store-page text, screenshots, release notes
+promo/                   Store-page text, screenshots, release archives
+docs/plan/               Master plan and refactor/feature reports
 ```
 
 ## Credits & licenses
