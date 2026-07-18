@@ -1,5 +1,11 @@
-GNOMOBOY — Shards of the Mountain Heart (v4.1.1)
+GNOMOBOY — Shards of the Mountain Heart (v4.2.0)
 ======================================
+
+What's new in 4.2:
+  - Localization fixes: shop consumables, PvP victory banner, mouse-button
+    names, hotbar codes are now translated in all three languages
+  - Big internal refactor (test harness, world generation, HUD panels,
+    shop/POI services split into modules) — same gameplay, cleaner code
 
 Patch 4.1.1 (level-design fixes):
   - Gates are open now (were showing closed doors across the road)

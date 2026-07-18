@@ -6,7 +6,7 @@ extends Node
 enum Mode { NONE, SINGLE, HOST, CLIENT }
 
 const DEFAULT_PORT := 7777
-const GAME_VERSION := "4.1" # у хоста и клиента должна совпадать
+const GAME_VERSION := "4.2" # у хоста и клиента должна совпадать (4.2: PVPWIN-баннер)
 
 var mode: int = Mode.NONE
 var game_mode: String = "pve" # pve | pvp | story
