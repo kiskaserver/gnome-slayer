@@ -249,7 +249,7 @@ func cutscene_line(text: String) -> float:
 	var reveal_dur := _typewriter(subtitle_label, text, SUBTITLE_REVEAL_CPS)
 	var total: float = maxf(SUBTITLE_MIN_TIME, text.length() / SUBTITLE_READ_CPS)
 	total = maxf(total, reveal_dur + 0.8)
-	var t := hud.create_tween()
+	var t: Tween = hud.create_tween()
 	t.tween_property(subtitle_label, "modulate:a", 1.0, 0.3)
 	t.tween_interval(maxf(0.0, total - 0.3))
 	t.tween_property(subtitle_label, "modulate:a", 0.0, 0.4)

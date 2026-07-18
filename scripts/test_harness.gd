@@ -49,6 +49,7 @@ func handle_cmdline() -> void:
 		print("[TEST] i18n uk: %s | %s | %s" % [tr("ГНОМОБОЙ"), tr("ЗДОРОВЬЕ"), tr("[%s] — открыть сундук") % "E"])
 		TranslationServer.set_locale(prev_locale)
 		_check_localization()
+		_reset_test_saves()
 	for arg in OS.get_cmdline_user_args():
 		if arg == "--test":
 			_test_mode = "single"
@@ -108,16 +109,32 @@ func _check_localization() -> void:
 		keys.append(Game.ITEM_DEFS[id].title)
 		keys.append(Game.ITEM_DEFS[id].short)
 	keys.append_array(["ЛКМ", "ПКМ", "СКМ", "Мышь %d", "Друг", "%s ПОБЕЖДАЕТ!", "гномы"])
-	var prev_locale := TranslationServer.get_locale()
+	# Проверяем наличие ключа в каталоге локали, а не tr(x)==x: легитимно
+	# одинаковые переводы ("Бомба" uk==ru) — не пропуск.
 	var missing: Array = []
 	for loc in ["uk", "en"]:
-		TranslationServer.set_locale(loc)
+		var cat: Translation = TranslationServer.get_translation_object(loc)
 		for k in keys:
-			if TranslationServer.translate(k) == k:
+			if cat == null or String(cat.get_message(k)).is_empty():
 				missing.append("%s:%s" % [loc, k])
-	TranslationServer.set_locale(prev_locale)
 	print("[TEST] i18n guard: keys=%d missing=%d %s PASS=%s" % [
 		keys.size() * 2, missing.size(), str(missing), str(missing.is_empty())])
+
+
+## Герметичность прогонов: тестовые сейвы (test_*) переживают запуск и
+## протаскивают экипировку/главу прошлого прогона в новый (например, арбалет,
+## надетый в конце --test-story). Сносим их перед стартом; --continue
+## намеренно продолжает прошлую кампанию — тогда не трогаем.
+func _reset_test_saves() -> void:
+	if Net.continue_campaign:
+		return
+	for i in range(1, Save.SLOTS + 1):
+		if FileAccess.file_exists(Save.slot_path(i)):
+			DirAccess.remove_absolute(Save.slot_path(i))
+	if FileAccess.file_exists(Save.meta_path()):
+		DirAccess.remove_absolute(Save.meta_path())
+	Save.active_slot = 1
+	Save.load_slot(Save.active_slot)
 
 
 func tick(delta: float) -> void:
