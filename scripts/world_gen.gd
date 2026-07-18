@@ -1261,6 +1261,16 @@ static func _far_from(obstacles: Array, x: float, z: float, min_d: float) -> boo
 	return true
 
 
+## Клиренс по СУММЕ радиусов: объект радиуса r не пересекает ни один obstacle
+## (учитывает радиус каждого препятствия + зазор). Именно это не даёт зданиям
+## налезать друг на друга и на дома/крипту.
+static func _clear_of(obstacles: Array, x: float, z: float, r: float, gap := 1.0) -> bool:
+	for o in obstacles:
+		if Vector2(x - o.x, z - o.z).length() < float(o.get("r", 0.0)) + r + gap:
+			return false
+	return true
+
+
 # ===========================================================================
 # ОВЕРВОРЛД: мир-путешествие для сюжета — лагерь, дорога через области,
 # поселение/поле боя/роща, вход в подземелье на дальнем краю.
@@ -1312,27 +1322,128 @@ static func _yaw_along(dir_angle: float) -> float:
 	return -dir_angle
 
 
-## Линия забора поперёк дороги с воротами arch_gate над самой дорогой.
+## Ворота arch_gate: прячем створки (arch_gate_left/right), оставляя открытый
+## каменный проём — иначе дорога визуально перегорожена закрытыми дверьми.
+static func _open_gate(gate: Node3D) -> void:
+	for leaf in ["arch_gate_left", "arch_gate_right", "fence_gate_left", "fence_gate_right"]:
+		for n in gate.find_children(leaf, "", true, false):
+			n.visible = false
+
+
+## Линия забора поперёк дороги с открытыми воротами над самой дорогой.
+## dir_angle — направление движения по дороге; забор ставится перпендикулярно,
+## оставляя в центре проём под ширину дороги.
 static func _fence_gate_line(parent: Node3D, rng: RandomNumberGenerator, gate_pos: Vector3, dir_angle: float, half_len: float, obstacles: Array) -> void:
 	var across := dir_angle + PI * 0.5
 	var yaw := _yaw_along(across)
 	var gate := place_prop(parent, "halloween/arch_gate.gltf", gate_pos, yaw, 1.35)
+	_open_gate(gate)
 	for mi in gate.find_children("*", "MeshInstance3D", true, false):
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	# сами ворота — проходные (без коллизии), забор по бокам — с коллизией.
-	# Секции слегка внахлёст (шаг чуть меньше длины), чтобы линия была сплошной.
+	# проём под дорогу; забор по бокам — с коллизией. Секции слегка внахлёст.
 	var fences := ["halloween/fence.gltf", "halloween/fence.gltf", "halloween/fence_broken.gltf"]
 	var flen := 4.0 * 1.1
 	var seg := flen * 0.96
+	var gap := 3.4 # половина ширины проёма
 	for side in [-1.0, 1.0]:
 		var n := int(half_len / seg)
 		for i in range(1, n + 1):
-			var off: float = (2.9 + (i - 0.5) * seg) * side
+			var off: float = (gap + (i - 0.5) * seg) * side
 			var fx: float = gate_pos.x + cos(across) * off
 			var fz: float = gate_pos.z + sin(across) * off
 			place_prop(parent, fences[rng.randi() % fences.size()], Vector3(fx, 0, fz), yaw, 1.1)
 			_static_box(parent, fx, fz, yaw, flen, 2.0, 0.4)
 			obstacles.append({"x": fx, "z": fz, "r": 1.6})
+
+
+## Ворота вдоль дороги в открытых промежутках между областями (макс. 2).
+static func _place_gates(parent: Node3D, rng: RandomNumberGenerator, samples: Array, areas: Array, obstacles: Array) -> void:
+	var placed := 0
+	var last_i := -100
+	var i := 8
+	while i < samples.size() - 4 and placed < 2:
+		var p: Vector3 = samples[i]
+		if _in_area(areas, p.x, p.z, 4.0) or (i - last_i) < 16:
+			i += 1
+			continue
+		var tan: Vector3 = samples[i + 1] - samples[i - 1]
+		tan.y = 0
+		if tan.length() < 0.01:
+			i += 1
+			continue
+		_fence_gate_line(parent, rng, Vector3(p.x, 0, p.z), atan2(tan.z, tan.x), 11.0, obstacles)
+		placed += 1
+		last_i = i
+		i += 1
+
+
+## Застройка поселения кольцом вокруг площади с гарантированным клиренсом:
+## здания не налезают друг на друга, на дорогу и на уже расставленное.
+static func _place_settlement(parent: Node3D, rng: RandomNumberGenerator, center: Vector3, road: Array, obstacles: Array) -> void:
+	var defs := [
+		{"m": "medieval/building_tavern_green.gltf", "r": 3.6},
+		{"m": "medieval/building_market_green.gltf", "r": 3.8},
+		{"m": "medieval/building_blacksmith_green.gltf", "r": 3.2},
+		{"m": "medieval/building_home_A_green.gltf", "r": 2.4},
+		{"m": "medieval/building_home_A_green.gltf", "r": 2.4},
+	]
+	var n := defs.size()
+	var base_ang := rng.randf_range(0, TAU)
+	for i in n:
+		var d: Dictionary = defs[i]
+		for attempt in 40:
+			var ang: float = base_ang + TAU * float(i) / n + rng.randf_range(-0.25, 0.25)
+			var rad: float = 12.0 + attempt * 1.0
+			var bx: float = center.x + cos(ang) * rad
+			var bz: float = center.z + sin(ang) * rad
+			if not _clear_of(obstacles, bx, bz, d.r, 2.0):
+				continue
+			if _road_dist(road, bx, bz) < d.r + 2.0:
+				continue
+			# фасад — к центру площади (локальная +Z смотрит на центр)
+			var yaw: float = atan2(center.x - bx, center.z - bz)
+			place_prop(parent, d.m, Vector3(bx, 0, bz), yaw, 4.0)
+			_static_cylinder(parent, bx, bz, d.r, 5.0)
+			obstacles.append({"x": bx, "z": bz, "r": d.r})
+			break
+
+
+## Фонари ВДОЛЬ дороги: смещение по ЛОКАЛЬНОМУ перпендикуляру (а не глобальному),
+## поэтому на поворотах и боковых ветках фонарь стоит сбоку, а не на тропе.
+static func _place_lanterns(parent: Node3D, rng: RandomNumberGenerator, samples: Array, obstacles: Array) -> void:
+	var step := 13
+	var i := step
+	while i < samples.size() - 1:
+		var p: Vector3 = samples[i]
+		var tan: Vector3 = samples[mini(samples.size() - 1, i + 1)] - samples[maxi(0, i - 1)]
+		tan.y = 0
+		if tan.length() < 0.01:
+			i += step
+			continue
+		tan = tan.normalized()
+		var perp := Vector3(-tan.z, 0, tan.x)
+		# выбираем сторону, где чище (нет здания/POI впритык)
+		var side := 1.0
+		var ca: Vector3 = p + perp * 2.7
+		var cb: Vector3 = p - perp * 2.7
+		if not _far_from(obstacles, ca.x, ca.z, 1.6) and _far_from(obstacles, cb.x, cb.z, 1.6):
+			side = -1.0
+		var pos: Vector3 = p + perp * (2.7 * side)
+		if not _far_from(obstacles, pos.x, pos.z, 1.2):
+			i += step
+			continue
+		# фонарь развёрнут «лицом» к дороге (локальная +Z в сторону -perp*side)
+		var yaw: float = atan2(-perp.x * side, -perp.z * side)
+		var lp := place_prop(parent, "halloween/post_lantern.gltf", Vector3(pos.x, 0, pos.z), yaw, 1.1)
+		var ll := OmniLight3D.new()
+		ll.light_color = Color(1.0, 0.75, 0.4)
+		ll.light_energy = 0.0
+		ll.omni_range = 6.0
+		ll.position.y = 2.2
+		ll.add_to_group("night_light")
+		lp.add_child(ll)
+		obstacles.append({"x": pos.x, "z": pos.z, "r": 0.5})
+		i += step
 
 
 ## Тонкий коллайдер-бокс (для заборов) — прямоугольный, повёрнутый.
@@ -1400,80 +1511,60 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 	areas.append({"id": "approach", "kind": "approach", "center": approach_c, "radius": 17.0})
 
 	# --- дорога: лагерь -> поселение -> развилка -> подход к подземелью ---
+	# main_samples — только магистраль (для ворот и фонарей вдоль неё)
 	var fork: Vector3 = dirv * 72.0
 	var road_pts := [Vector3(6, 0, 6), dirv * 26.0, settle_c, fork, approach_c]
-	var road := _lay_road(parent, rng, road_pts)
+	var main_samples := _lay_road(parent, rng, road_pts)
+	var road := main_samples.duplicate()
 	# боковые тропы к полю боя и роще
 	road += _lay_road(parent, rng, [fork, battle_c])
 	road += _lay_road(parent, rng, [fork, grove_c])
 
-	# --- ворота на дороге: границы поясов ---
-	_fence_gate_line(parent, rng, dirv * 33.0, road_a, 14.0, obstacles)
-	_fence_gate_line(parent, rng, dirv * 88.0, road_a, 12.0, obstacles)
-
-	# --- вход в подземелье: крипта с аркой на дальнем краю ---
+	# --- вход в подземелье: крипта с аркой на дальнем краю (ставим первой,
+	# как ориентир, и регистрируем в obstacles — всё прочее её обходит) ---
 	var crypt_pos: Vector3 = approach_c + dirv * 8.0
-	# фасад крипты — к дороге: локальная +Z в направлении -dirv
-	var crypt_yaw := atan2(-dirv.x, -dirv.z)
+	var crypt_yaw := atan2(-dirv.x, -dirv.z) # фасад к дороге
 	var crypt := place_prop(parent, "halloween/crypt.gltf", crypt_pos, crypt_yaw, 1.25)
 	for mi in crypt.find_children("*", "MeshInstance3D", true, false):
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	_static_cylinder(parent, crypt_pos.x, crypt_pos.z, 4.5, 6.0)
 	obstacles.append({"x": crypt_pos.x, "z": crypt_pos.z, "r": 4.5})
 	var dungeon_entrance: Vector3 = crypt_pos - dirv * 5.5
-	place_prop(parent, "halloween/lantern_standing.gltf", dungeon_entrance + sidev * 2.0, rng.randf_range(0, TAU), 1.2)
-	place_prop(parent, "halloween/lantern_standing.gltf", dungeon_entrance - sidev * 2.0, rng.randf_range(0, TAU), 1.2)
+	place_prop(parent, "halloween/lantern_standing.gltf", dungeon_entrance + sidev * 2.4, atan2(-sidev.x, -sidev.z), 1.2)
+	place_prop(parent, "halloween/lantern_standing.gltf", dungeon_entrance - sidev * 2.4, atan2(sidev.x, sidev.z), 1.2)
+	obstacles.append({"x": dungeon_entrance.x + sidev.x * 2.4, "z": dungeon_entrance.z + sidev.z * 2.4, "r": 0.6})
+	obstacles.append({"x": dungeon_entrance.x - sidev.x * 2.4, "z": dungeon_entrance.z - sidev.z * 2.4, "r": 0.6})
 
-	# --- домики гномов по областям (спавны врагов) ---
+	# --- застройка поселения (кольцом, с проверкой пересечений) ---
+	_place_settlement(parent, rng, settle_c, road, obstacles)
+
+	# --- ворота в открытых промежутках дороги (открытые створки) ---
+	_place_gates(parent, rng, main_samples, areas, obstacles)
+
+	# --- домики гномов по областям (спавны врагов) — обходят всё вышестоящее ---
 	for area in areas:
 		if area.kind in ["camp"]:
 			continue
 		var n_houses := 3 if area.kind != "approach" else 2
 		for i in n_houses:
-			var ha := rng.randf_range(0, TAU)
-			var hr: float = area.radius * rng.randf_range(0.45, 0.8)
-			var hx: float = area.center.x + cos(ha) * hr
-			var hz: float = area.center.z + sin(ha) * hr
-			if not _far_from(obstacles, hx, hz, 6.0) or _road_dist(road, hx, hz) < 4.0:
-				continue
-			var house := _house(parent, hx, hz)
-			house["area"] = area.id
-			houses.append(house)
-			obstacles.append({"x": hx, "z": hz, "r": 2.0})
-			spawn_points.append(Vector3(hx + house.dirx * 2.2, 0, hz + house.dirz * 2.2))
+			var placed := false
+			for _t in 30:
+				var ha := rng.randf_range(0, TAU)
+				var hr: float = area.radius * rng.randf_range(0.5, 0.85)
+				var hx: float = area.center.x + cos(ha) * hr
+				var hz: float = area.center.z + sin(ha) * hr
+				if not _clear_of(obstacles, hx, hz, 2.6, 1.2) or _road_dist(road, hx, hz) < 4.0:
+					continue
+				var house := _house(parent, hx, hz)
+				house["area"] = area.id
+				houses.append(house)
+				obstacles.append({"x": hx, "z": hz, "r": 2.6})
+				spawn_points.append(Vector3(hx + house.dirx * 2.2, 0, hz + house.dirz * 2.2))
+				placed = true
+				break
 
-	# --- застройка поселения: таверна, кузница, рынок и пара домиков ---
-	# (модели Medieval Hexagon в хекс-масштабе — увеличиваем в 4 раза)
-	var sv := Vector3(-dirv.z, 0, dirv.x)
-	var buildings := [
-		{"m": "medieval/building_tavern_green.gltf", "off": dirv * -9.0 + sv * 8.0, "r": 3.4},
-		{"m": "medieval/building_blacksmith_green.gltf", "off": dirv * 8.0 + sv * 9.0, "r": 3.2},
-		{"m": "medieval/building_market_green.gltf", "off": dirv * -2.0 - sv * 10.0, "r": 3.6},
-		{"m": "medieval/building_home_A_green.gltf", "off": dirv * 10.0 - sv * 7.0, "r": 2.2},
-		{"m": "medieval/building_home_A_green.gltf", "off": dirv * -11.0 - sv * 5.0, "r": 2.2},
-	]
-	for bd in buildings:
-		var bpos: Vector3 = settle_c + bd.off
-		if _road_dist(road, bpos.x, bpos.z) < 4.5:
-			bpos += sv * 4.0 # не ставим здание прямо на дорогу
-		# фасад — к центру площади (локальная +Z смотрит на центр)
-		var to_c := settle_c - bpos
-		var byaw := atan2(to_c.x, to_c.z)
-		place_prop(parent, bd.m, bpos, byaw, 4.0)
-		_static_cylinder(parent, bpos.x, bpos.z, bd.r, 5.0)
-		obstacles.append({"x": bpos.x, "z": bpos.z, "r": bd.r})
-
-	# --- фонари вдоль дороги (ориентиры в сумерках) ---
-	for i in range(6, road.size(), 24):
-		var p: Vector3 = road[i]
-		var lp := place_prop(parent, "halloween/post_lantern.gltf", Vector3(p.x, 0, p.z) + sidev * 1.8, _yaw_along(road_a), 1.1)
-		var ll := OmniLight3D.new()
-		ll.light_color = Color(1.0, 0.75, 0.4)
-		ll.light_energy = 0.0
-		ll.omni_range = 6.0
-		ll.position.y = 2.2
-		ll.add_to_group("night_light")
-		lp.add_child(ll)
+	# --- фонари вдоль магистрали (сбоку, по локальному перпендикуляру) ---
+	_place_lanterns(parent, rng, main_samples, obstacles)
 
 	# --- точки интереса: по одной на область (кроме лагеря и подхода) ---
 	var poi_kinds := ["ruins", "standing_stones", "shrine", "campfire", "well", "bounty_board", "crypt", "battlefield"]
@@ -1498,7 +1589,7 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 				var pr: float = area.radius * rng.randf_range(0.3, 0.85)
 				var px: float = area.center.x + cos(pa) * pr
 				var pz: float = area.center.z + sin(pa) * pr
-				if Vector2(px - 6.0, pz - 6.0).length() > 12.0 and _far_from(obstacles, px, pz, 9.0) and _road_dist(road, px, pz) > 4.0:
+				if Vector2(px - 6.0, pz - 6.0).length() > 12.0 and _clear_of(obstacles, px, pz, 3.0, 2.5) and _road_dist(road, px, pz) > 4.5:
 					pos = Vector3(px, 0, pz)
 					break
 			if pos == Vector3.INF:
@@ -1532,7 +1623,7 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 			var tr: float = area.radius * rng.randf_range(0.4, 0.9)
 			var tx: float = area.center.x + cos(ta) * tr
 			var tz: float = area.center.z + sin(ta) * tr
-			if _far_from(obstacles, tx, tz, 5.0) and _road_dist(road, tx, tz) > 4.0:
+			if _clear_of(obstacles, tx, tz, 0.7, 1.0) and _road_dist(road, tx, tz) > 4.0:
 				_tree(parent, rng, b, tx, tz, rng.randf_range(0.9, 1.4), true)
 				obstacles.append({"x": tx, "z": tz, "r": 0.7})
 		for i in 3:
@@ -1540,7 +1631,7 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 			var rr: float = area.radius * rng.randf_range(0.4, 0.9)
 			var rx: float = area.center.x + cos(ra) * rr
 			var rz: float = area.center.z + sin(ra) * rr
-			if _far_from(obstacles, rx, rz, 4.0) and _road_dist(road, rx, rz) > 3.0:
+			if _clear_of(obstacles, rx, rz, 1.1, 0.8) and _road_dist(road, rx, rz) > 3.0:
 				var s := rng.randf_range(0.6, 1.2)
 				_rock(parent, rng, rx, rz, s, true)
 				obstacles.append({"x": rx, "z": rz, "r": s * 0.9})

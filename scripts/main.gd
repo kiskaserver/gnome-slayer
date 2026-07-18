@@ -1752,6 +1752,22 @@ func _process(delta: float) -> void:
 				game.world_areas.size(), game.world_road.size(),
 				str(game.dungeon_entrance != Vector3.INF),
 				str(game.world_areas.size() >= 5 and game.world_road.size() >= 3 and game.dungeon_entrance != Vector3.INF)])
+			# уровень-дизайн: крупные объекты (здания/дома/POI/крипта, r>=2) не
+			# должны пересекаться коллайдерами — это ловит «здание в здании»
+			var big: Array = []
+			for o in game.world_obstacles:
+				if float(o.get("r", 0.0)) >= 2.0:
+					big.append(o)
+			var overlaps := 0
+			for a in big.size():
+				for b2 in range(a + 1, big.size()):
+					var oa: Dictionary = big[a]
+					var ob: Dictionary = big[b2]
+					var d2: float = Vector2(oa.x - ob.x, oa.z - ob.z).length()
+					if d2 < oa.r + ob.r - 0.3: # пересечение коллайдеров
+						overlaps += 1
+			print("[TEST] overworld: %d big props, %d collider overlaps PASS=%s" % [
+				big.size(), overlaps, str(overlaps == 0)])
 			var cp_ok := game.team_checkpoint != Vector2.INF
 			print("[TEST] overworld: checkpoint set=%s (campfire rest)" % str(cp_ok))
 			# поводок: у врага с домом далёкая цель игнорируется
