@@ -101,9 +101,10 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 		var n_houses := 2 if area.kind == "approach" else (4 if area.kind == "enemy_camp" else 3)
 		for i in n_houses:
 			var placed := false
-			for _t in 30:
+			for _t in 60:
 				var ha := rng.randf_range(0, TAU)
-				var hr: float = area.radius * rng.randf_range(0.5, 0.85)
+				# в тесном поселении (застройка + ятки) домики выносим на внешнее кольцо
+				var hr: float = area.radius * (rng.randf_range(0.6, 0.98) if area.kind == "settlement" else rng.randf_range(0.5, 0.85))
 				var hx: float = area.center.x + cos(ha) * hr
 				var hz: float = area.center.z + sin(ha) * hr
 				if not WgGeom._clear_of(obstacles, hx, hz, 2.6, 1.2) or WgGeom._road_dist(road, hx, hz) < 4.0:
@@ -140,9 +141,9 @@ static func build_overworld(parent: Node3D, world_seed: int, biome_id: String) -
 			var kind: String = poi_kinds[pk]
 			pk += 1
 			var pos := Vector3.INF
-			for _try in 40:
+			for _try in 80:
 				var pa := rng.randf_range(0, TAU)
-				var pr: float = area.radius * rng.randf_range(0.3, 0.85)
+				var pr: float = area.radius * rng.randf_range(0.3, 0.9)
 				var px: float = area.center.x + cos(pa) * pr
 				var pz: float = area.center.z + sin(pa) * pr
 				if Vector2(px - 6.0, pz - 6.0).length() > 12.0 and WgGeom._clear_of(obstacles, px, pz, 3.0, 2.5) and WgGeom._road_dist(road, px, pz) > 4.5:

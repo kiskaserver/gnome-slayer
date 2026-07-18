@@ -53,6 +53,10 @@ func server_dungeon_begin() -> void:
 		var base: Vector3 = game.boss_spot if i % 3 == 0 else game.spawn_points[0]
 		# раскидываем по комнатам: треть у босса, остальные от входа вглубь
 		game.server_spawn_gnome_at(types[i % types.size()], base + Vector3(cos(a) * r, 0, sin(a) * r), game.enemy_level())
+	# мини-босс стережёт ключ от решётки зала босса (M5): элита уровнем выше
+	if game.dungeon_miniboss_spot != Vector3.INF and not game.dungeon_door.is_empty():
+		game.server_spawn_gnome_at(roles.melee, game.dungeon_miniboss_spot, game.enemy_level() + 1, true)
+		game.miniboss_gid = game.gnome_seq
 	# босс ждёт в дальнем зале
 	if game.q_main == 2:
 		game.boss_gid = game.gnome_seq + 1
@@ -215,6 +219,11 @@ func _check_side_done() -> void:
 func on_gnome_died(g) -> void:
 	var cfg: Dictionary = game.chapter_cfg()
 	var roles: Dictionary = game.BIOME_ENEMIES.get(Net.biome, game.BIOME_ENEMIES["meadow"])
+	# страж ключа пал — решётка зала босса поднимается (M5)
+	if g.gid == game.miniboss_gid and not game.dungeon_door.is_empty() \
+			and not game.dungeon_door.get("opened", false):
+		Net.bcast("rpc_door_opened", [])
+		Net.bcast("rpc_banner", ["РЕШЁТКА ПОДНЯТА — ПУТЬ К ХРАНИТЕЛЮ ОТКРЫТ"])
 	if game.q_main == 1 and g.gid != game.boss_gid:
 		game.q_kills += 1
 		if game.q_kills >= story_kill_target():
@@ -226,6 +235,17 @@ func on_gnome_died(g) -> void:
 		game.q_main = 3
 		_spawn_qnode("shard", g.global_position)
 		bcast_quest()
+		# ниша наград (M5): пара трофеев — взял один, второй рассыплется
+		if not game.dungeon_reward_spots.is_empty() and game.reward_pair.is_empty():
+			for spot in game.dungeon_reward_spots:
+				var drop := Items.roll_drop(game.enemy_level() + 1, 0, randi(), true)
+				if not drop.is_empty():
+					game.server_spawn_item_drop(drop, spot.x, spot.z)
+					game.reward_pair.append(game.drop_seq)
+			if game.reward_pair.size() >= 2:
+				Net.bcast("rpc_sys", ["Трофеи хранителя: возьми один — второй рассыплется."])
+			else:
+				game.reward_pair.clear()
 	if game.q_side == 1 and cfg.side.type == "kill_fast" and g.type == roles.fast:
 		game.q_side_n += 1
 		_check_side_done()
@@ -307,7 +327,7 @@ func update_story(delta: float) -> void:
 				var pp: Vector3 = game.player_nodes[id].global_position
 				for t in game.dungeon_traps:
 					if Vector2(pp.x - t.x, pp.z - t.z).length() < t.r:
-						game.server_damage_player(id, 6, Vector3(t.x, 0, t.z))
+						game.server_damage_player(id, int(t.get("dmg", 6)), Vector3(t.x, 0, t.z))
 						break
 		if game.q_main == 4 and not game.portal_open and game.portal_node == null:
 			# осколок взят — открываем портал наружу в зале босса

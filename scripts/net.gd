@@ -317,6 +317,18 @@ func rpc_chest_opened(cid: int) -> void:
 
 
 @rpc("authority", "call_local", "reliable")
+func rpc_secret_opened() -> void:
+	if game != null:
+		game.on_secret_opened()
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_door_opened() -> void:
+	if game != null:
+		game.on_door_opened()
+
+
+@rpc("authority", "call_local", "reliable")
 func rpc_item_granted(id: int, type: String) -> void:
 	if game != null:
 		game.on_item_granted(id, type)
@@ -739,6 +751,20 @@ func req_revive(target_id: int) -> void:
 func rpc_req_open_chest(cid: int) -> void:
 	if game != null and is_server:
 		game.server_open_chest(multiplayer.get_remote_sender_id(), cid)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_req_secret() -> void:
+	if game != null and is_server:
+		game.server_open_secret(multiplayer.get_remote_sender_id())
+
+
+func req_secret() -> void:
+	if is_server:
+		if game != null:
+			game.server_open_secret(my_id)
+	else:
+		rpc_id(1, "rpc_req_secret")
 
 
 func req_open_chest(cid: int) -> void:

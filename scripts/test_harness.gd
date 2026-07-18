@@ -210,6 +210,10 @@ func _check_overworld_layout() -> void:
 		for c2 in game.chests.values():
 			if Vector2(c2.x - area.center.x, c2.z - area.center.z).length() < area.radius:
 				n_int += 1
+		# вход в подземелье — главный интерактив своей области (подход к склепу)
+		if game.dungeon_entrance != Vector3.INF \
+				and Vector2(game.dungeon_entrance.x - area.center.x, game.dungeon_entrance.z - area.center.z).length() < area.radius + 8.0:
+			n_int += 1
 		if n_int < 2:
 			sparse.append("%s:%d" % [area.id, n_int])
 	print("[TEST] overworld: density sparse=%s PASS=%s" % [str(sparse), str(sparse.is_empty())])
@@ -345,6 +349,19 @@ func tick(delta: float) -> void:
 		if _shot_stage == 0 and _test_timer > 5.0:
 			_shot_stage = 99
 			await _check_overworld_layout()
+			# и подземелье этой главы: тема по биому, структура M5 на месте
+			game.zones.server_enter_dungeon()
+		elif _shot_stage == 99 and _test_timer > 10.0 and Net.zone == "dungeon":
+			_shot_stage = 100
+			var mb = game.gnomes.get(game.miniboss_gid)
+			print("[TEST] dungeon-layout: theme=%s chests=%d secret=%s door=%s miniboss=%s rewards=%d traps=%d PASS=%s" % [
+				game.dungeon_theme, game.dungeon_chest_spots.size(),
+				str(not game.dungeon_secret.is_empty()), str(not game.dungeon_door.is_empty()),
+				str(mb != null and mb.elite), game.dungeon_reward_spots.size(), game.dungeon_traps.size(),
+				str(game.dungeon_theme in ["crypt", "cave", "catacombs"]
+					and not game.dungeon_secret.is_empty() and not game.dungeon_door.is_empty()
+					and mb != null and mb.elite and game.dungeon_reward_spots.size() == 2
+					and game.dungeon_chest_spots.size() >= 1)])
 			print("[TEST] done, quitting. mode=story chapter=%d" % _start_chapter)
 			get_tree().quit()
 		elif _test_timer > 40.0:
@@ -411,19 +428,51 @@ func tick(delta: float) -> void:
 				str(game.boss_spot != Vector3.INF),
 				str(Net.zone == "dungeon" and game.q_main == 2 and game.server_gold == _test_gold_carry \
 					and boss != null and game.boss_spot != Vector3.INF)])
+			# M5: тема, секретная кладка, решётка со стражем ключа, ниша наград
+			var mb = game.gnomes.get(game.miniboss_gid)
+			print("[TEST] dungeon-m5: theme=%s secret=%s door=%s miniboss=%s rewards=%d PASS=%s" % [
+				game.dungeon_theme, str(not game.dungeon_secret.is_empty()),
+				str(not game.dungeon_door.is_empty() and not game.dungeon_door.get("opened", false)),
+				str(mb != null and mb.elite), game.dungeon_reward_spots.size(),
+				str(game.dungeon_theme != "" and not game.dungeon_secret.is_empty()
+					and not game.dungeon_door.is_empty() and mb != null and mb.elite
+					and game.dungeon_reward_spots.size() == 2)])
+			# секретная кладка: подойти и расшатать
+			if not game.dungeon_secret.is_empty():
+				me3.global_position = Vector3(game.dungeon_secret.x + 1.2, 0, game.dungeon_secret.z)
+				game.server_open_secret(1)
+				print("[TEST] dungeon-m5: secret opened=%s PASS=%s" % [
+					str(game.dungeon_secret.get("opened", false)), str(game.dungeon_secret.get("opened", false))])
+			# ключ у стража: его смерть поднимает решётку
+			if mb != null and mb.alive:
+				mb.last_attacker = 1
+				mb.server_take_damage(99999, mb.global_position + Vector3(1, 0, 0), false)
+			print("[TEST] dungeon-m5: door after key opened=%s PASS=%s" % [
+				str(game.dungeon_door.get("opened", false)), str(game.dungeon_door.get("opened", false))])
 			if boss != null and boss.alive:
 				boss.last_attacker = 1
 				boss.server_take_damage(99999, boss.global_position + Vector3(1, 0, 0), false)
 			print("[TEST] dungeon: boss killed, q_main=%d PASS=%s" % [game.q_main, str(game.q_main == 3)])
 		elif _shot_stage == 4 and _test_timer > 10.0:
+			_shot_stage = 41
+			# M5: пара трофеев в нише — телепорт к первому (второй должен рассыпаться)
+			print("[TEST] dungeon-m5: reward pair=%d PASS=%s" % [
+				game.reward_pair.size(), str(game.reward_pair.size() == 2)])
+			if game.reward_pair.size() == 2:
+				var d0: Dictionary = game.item_drops.get(game.reward_pair[0], {})
+				if not d0.is_empty() and is_instance_valid(d0.node):
+					me3.global_position = d0.node.global_position + Vector3(0.4, 0, 0)
+		elif _shot_stage == 41 and _test_timer > 11.4:
 			_shot_stage = 5
+			print("[TEST] dungeon-m5: reward choice pair_left=%d drops_left=%d PASS=%s" % [
+				game.reward_pair.size(), game.item_drops.size(), str(game.reward_pair.is_empty())])
 			var me4: PlayerChar = game.player_nodes.get(Net.my_id)
 			for id in game.qnodes.keys():
 				if game.qnodes[id].kind == "shard":
 					me4.global_position = game.qnodes[id].node.global_position + Vector3(1, 0, 0)
 					game.server_qnode_take(1, id)
 			print("[TEST] dungeon: shard taken, q_main=%d PASS=%s" % [game.q_main, str(game.q_main == 4)])
-		elif _shot_stage == 5 and _test_timer > 11.5:
+		elif _shot_stage == 5 and _test_timer > 12.6:
 			_shot_stage = 6
 			# осколок лежит в зале босса, портал наружу открывается там же —
 			# игрок мог выйти мгновенно (портал под ногами). Оба исхода валидны.

@@ -265,6 +265,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				Net.req_qnode(qid)
 			elif cid != 0:
 				Net.req_open_chest(cid)
+			elif game.secret_near(global_position, 3.0):
+				Net.req_secret()
 			elif poi_idx >= 0:
 				var poi_kind: String = game.world_pois[poi_idx].kind
 				match poi_kind:

@@ -308,6 +308,8 @@ func update_pickups(delta: float) -> void:
 ## Тик дропов экипировки: вращение у всех, на сервере — подбор и истечение.
 func update_item_drops(delta: float) -> void:
 	for did in game.item_drops.keys():
+		if not game.item_drops.has(did):
+			continue # партнёрский трофей уже рассыпался внутри этого же тика
 		var d: Dictionary = game.item_drops[did]
 		d.life += delta
 		if is_instance_valid(d.node):
@@ -322,6 +324,12 @@ func update_item_drops(delta: float) -> void:
 			if d.node.global_position.distance_to(game.player_nodes[id].global_position) < 1.6:
 				if grant_equipment(id, d.item):
 					Net.bcast("rpc_item_drop_taken", [did, id])
+					# ниша наград (M5): выбор сделан — второй трофей рассыпается
+					if game.reward_pair.has(did):
+						for other in game.reward_pair:
+							if other != did and game.item_drops.has(other):
+								Net.bcast("rpc_item_drop_taken", [other, 0])
+						game.reward_pair.clear()
 				break
 		if d.life > 60.0 and game.item_drops.has(did):
 			Net.bcast("rpc_item_drop_taken", [did, 0])

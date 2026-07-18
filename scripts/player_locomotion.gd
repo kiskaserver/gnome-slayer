@@ -162,6 +162,8 @@ func local_sim(delta: float) -> void:
 			p.game.hud.set_hint(tr("[%s] — взять / разжечь") % key)
 		elif p.game.find_chest_near(p.global_position, 2.4) != 0:
 			p.game.hud.set_hint(tr("[%s] — открыть сундук") % key)
+		elif p.game.secret_near(p.global_position, 3.0):
+			p.game.hud.set_hint(tr("[%s] — расшатать кладку") % key)
 		else:
 			var poi_hint_idx: int = p.game.find_poi_near(p.global_position, 3.2)
 			if poi_hint_idx >= 0:
