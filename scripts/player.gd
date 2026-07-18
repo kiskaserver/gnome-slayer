@@ -18,18 +18,6 @@ const ANIM_TABLE := [
 	"PickUp",
 ]
 
-const COMBO_1H := [
-	{"anim": "1H_Melee_Attack_Slice_Horizontal", "dmg": 14, "range": 2.6, "arc": 1.25, "ts": 1.45},
-	{"anim": "1H_Melee_Attack_Slice_Diagonal", "dmg": 14, "range": 2.6, "arc": 1.25, "ts": 1.45},
-	{"anim": "1H_Melee_Attack_Chop", "dmg": 26, "range": 2.9, "arc": 1.5, "ts": 1.25},
-]
-# Великий меч: медленнее, больнее, шире дуга
-const COMBO_2H := [
-	{"anim": "2H_Melee_Attack_Slice", "dmg": 21, "range": 3.0, "arc": 1.6, "ts": 1.3},
-	{"anim": "2H_Melee_Attack_Spin", "dmg": 21, "range": 3.2, "arc": 2.7, "ts": 1.25},
-	{"anim": "2H_Melee_Attack_Chop", "dmg": 36, "range": 3.2, "arc": 1.7, "ts": 1.1},
-]
-
 const HIDE_1H := ["2H_Sword", "Offhand", "Badge_Shield", "Rectangle_Shield", "Spike_Shield"]
 const LOOP_ANIMS := ["Idle", "Walking_A", "Running_A", "Blocking", "Walking_Backwards", "PickUp"]
 
@@ -71,23 +59,22 @@ var cam_pitch: Node3D = null
 var camera: Camera3D = null
 var shake := 0.0
 
-# сеть
+# сеть (отправка/интерполяция — в PlayerLocomotion)
 var net_pos := Vector3.ZERO
 var net_rot := 0.0
 var net_anim := ""
-var send_timer := 0.0
-var _last_sent_anim := -1
-var _last_sent_pos := Vector3.ZERO
-var _revive_send_timer := 0.0
-var _revive_target_id := 0
-var _hint_timer := 0.0
 
 var name_label: Label3D = null
 var _move_dir := Vector3.ZERO
 
+var combat: PlayerCombat
+var loco: PlayerLocomotion
+
 
 func setup(g: Node, id: int, pname: String, color: Color) -> void:
 	game = g
+	combat = PlayerCombat.new(self)
+	loco = PlayerLocomotion.new(self)
 	peer_id = id
 	player_name = pname
 	is_local = (id == Net.my_id)
@@ -250,21 +237,7 @@ func _tick_buffs(delta: float) -> void:
 
 
 func _build_camera() -> void:
-	cam_yaw = Node3D.new()
-	cam_yaw.top_level = true
-	add_child(cam_yaw)
-	cam_pitch = Node3D.new()
-	cam_pitch.rotation.x = -0.35
-	cam_yaw.add_child(cam_pitch)
-	var spring := SpringArm3D.new()
-	spring.spring_length = 5.4
-	spring.margin = 0.3
-	spring.collision_mask = 1
-	cam_pitch.add_child(spring)
-	camera = Camera3D.new()
-	camera.fov = 60
-	spring.add_child(camera)
-	camera.current = true
+	loco.build_camera()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -334,119 +307,14 @@ func _play(anim: String, custom_speed: float = 1.0) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Бой
+# Бой — логика в PlayerCombat (player_combat.gd)
 # ---------------------------------------------------------------------------
 func try_attack() -> void:
-	if state == "dead" or state == "downed":
-		return
-	if state == "attack":
-		if state_time > attack_dur * 0.3:
-			combo_queued = true
-		return
-	if state in ["dodge", "hit", "revive_up"]:
-		return
-	_start_attack()
-
-
-func _start_attack() -> void:
-	var step: Dictionary = active_combo()[combo_step]
-	state = "attack"
-	state_time = 0.0
-	hit_done = false
-	combo_queued = false
-	attack_dur = _play(step.anim, step.ts)
-	Sfx.play_at("swing", global_position)
-	if is_ranged_weapon():
-		facing = cam_yaw.rotation.y + PI # арбалет целится по камере, не по ближайшему врагу
-	else:
-		_face_nearest_enemy()
-
-
-func _face_nearest_enemy() -> void:
-	var best = null
-	var best_d := 5.5
-	for g in game.gnomes.values():
-		if not g.alive or g.friendly:
-			continue # не доворачиваемся к своему наёмнику
-		var d: float = g.global_position.distance_to(global_position)
-		if d < best_d:
-			best_d = d
-			best = g
-	if game.is_pvp():
-		for p in game.player_nodes.values():
-			if p == self or p.state == "dead":
-				continue
-			var d: float = p.global_position.distance_to(global_position)
-			if d < best_d:
-				best_d = d
-				best = p
-	if best != null:
-		var dx: float = best.global_position.x - global_position.x
-		var dz: float = best.global_position.z - global_position.z
-		facing = atan2(dx, dz)
+	combat.try_attack()
 
 
 func try_dodge() -> void:
-	if state in ["dead", "downed", "dodge", "revive_up", "reviving"] or dodge_cooldown > 0:
-		return
-	if state == "attack" and state_time < attack_dur * 0.5:
-		return
-	state = "dodge"
-	state_time = 0.0
-	iframes = 0.45
-	var me: Dictionary = Net.players.get(Net.my_id, {})
-	dodge_cooldown = 0.9 * (1.0 - 0.05 * me.get("agi", 0)) * Skills.dodge_cd_mult(me) if is_local else 0.9
-	var dir := _move_dir if _move_dir.length_squared() > 0.01 else Vector3(sin(facing), 0, cos(facing))
-	dodge_dir = dir.normalized()
-	facing = atan2(dodge_dir.x, dodge_dir.z)
-	_play("Dodge_Forward", 1.5)
-	Sfx.play_at("roll", global_position)
-
-
-func _deal_damage(step: Dictionary) -> void:
-	# арбалет: клиент шлёт только направление — урон и попадание решает сервер
-	if is_ranged_weapon():
-		facing = cam_yaw.rotation.y + PI # стреляем туда, куда смотрит камера
-		Net.req_shoot(sin(facing), cos(facing))
-		Sfx.play_at("swing", global_position, -2.0, 1.6)
-		add_shake(0.08)
-		return
-	var targets: Array = []
-	for id in game.gnomes:
-		var g = game.gnomes[id]
-		if not g.alive or g.friendly:
-			continue # свой наёмник не получает урона от игрока
-		if _in_arc(g.global_position, step.range + 0.45, step.arc):
-			targets.append(["g", id])
-	if game.is_pvp():
-		for id in game.player_nodes:
-			if id == peer_id:
-				continue
-			var p = game.player_nodes[id]
-			if p.state == "dead" or p.state == "downed":
-				continue
-			if _in_arc(p.global_position, step.range + 0.45, step.arc):
-				targets.append(["p", id])
-	if targets.is_empty():
-		return
-	var me: Dictionary = Net.players.get(Net.my_id, {})
-	var crit := randf() < Quests.crit_chance_for(me) + Items.equip_crit_bonus(game.my_equip)
-	var dmg_f: float = step.dmg * (1.5 if has_buff("rage") else 1.0) * Quests.dmg_mult_for(me) \
-		* Items.equip_dmg_mult(game.my_equip)
-	var dmg: int = roundi(dmg_f * (1.8 * Quests.crit_dmg_mult_for(me) if crit else 1.0))
-	Net.req_melee(targets, dmg, crit)
-	Sfx.play_at("hit", global_position)
-	add_shake(0.12)
-	if is_local:
-		game.hud.combo_flash(combo_step + 1)
-
-
-func _in_arc(target: Vector3, dist: float, arc: float) -> bool:
-	var dx := target.x - global_position.x
-	var dz := target.z - global_position.z
-	if Vector2(dx, dz).length() > dist:
-		return false
-	return absf(angle_difference(atan2(dx, dz), facing)) < arc
+	combat.try_dodge()
 
 
 ## Визуальная реакция на изменение HP (сервер уже применил урон).
@@ -579,222 +447,9 @@ func add_shake(v: float) -> void:
 func _physics_process(delta: float) -> void:
 	_tick_buffs(delta)
 	if is_local:
-		_local_sim(delta)
+		loco.local_sim(delta)
 	else:
-		_puppet_sim(delta)
-
-
-func _local_sim(delta: float) -> void:
-	state_time += delta
-	dodge_cooldown = maxf(0, dodge_cooldown - delta)
-	iframes = maxf(0, iframes - delta)
-	combo_reset = maxf(0, combo_reset - delta)
-	if combo_reset == 0 and state != "attack":
-		combo_step = 0
-	shake = maxf(0, shake - delta * 1.8)
-	_update_camera(delta)
-
-	if state == "dead" or state == "downed":
-		velocity.x = 0
-		velocity.z = 0
-		velocity.y -= GRAVITY * delta
-		move_and_slide()
-		_send_state(delta)
-		return
-
-	var input_captured: bool = not game.ui_blocked
-	var iv := Input.get_vector("move_left", "move_right", "move_forward", "move_back") if input_captured else Vector2.ZERO
-	var cam_basis := cam_yaw.global_transform.basis
-	_move_dir = cam_basis * Vector3(iv.x, 0, iv.y)
-	var moving := _move_dir.length_squared() > 0.01
-	if moving:
-		_move_dir = _move_dir.normalized()
-	var running: bool = Input.is_action_pressed("run") and input_captured
-	var want_block: bool = Input.is_action_pressed("block") and input_captured
-
-	var speed_mul := 1.0
-	blocking = false
-
-	match state:
-		"attack":
-			speed_mul = 0.12
-			var step: Dictionary = active_combo()[combo_step]
-			if not hit_done and state_time >= attack_dur * 0.38:
-				hit_done = true
-				_deal_damage(step)
-			if state_time >= attack_dur * 0.72 and combo_queued:
-				combo_step = (combo_step + 1) % active_combo().size()
-				_start_attack()
-			elif state_time >= attack_dur:
-				state = "idle"
-				combo_step = (combo_step + 1) % active_combo().size()
-				combo_reset = 1.2
-		"dodge":
-			var t := state_time / 0.45
-			if t >= 1.0:
-				state = "idle"
-			else:
-				var sp := 10.0 * (1.0 - t * 0.6)
-				velocity.x = dodge_dir.x * sp
-				velocity.z = dodge_dir.z * sp
-				speed_mul = 0.0
-		"hit":
-			speed_mul = 0.25
-			if state_time > 0.4:
-				state = "idle"
-		"revive_up":
-			speed_mul = 0.0
-			if state_time > 1.0:
-				state = "idle"
-		"reviving":
-			# наклон над упавшим товарищем, пока держим [E] — раньше тут не менялось вообще ничего
-			speed_mul = 0.0
-			var dn = game.player_nodes.get(_revive_target_id)
-			if dn != null:
-				facing = rotate_toward(facing, atan2(dn.global_position.x - global_position.x, dn.global_position.z - global_position.z), TURN_SPEED * delta)
-		"block_hit":
-			speed_mul = 0.2
-			blocking = true
-			if state_time > 0.3:
-				state = "block" if want_block else "idle"
-				if state == "block":
-					_play("Blocking")
-		"block":
-			speed_mul = 0.35
-			blocking = true
-			if not want_block:
-				state = "idle"
-			facing = rotate_toward(facing, cam_yaw.rotation.y + PI, TURN_SPEED * delta)
-		_:
-			if want_block:
-				state = "block"
-				_play("Blocking")
-
-	# поднятие павшего друга (E рядом с упавшим) — наклоняемся и тянем, а не стоим истуканом
-	_revive_send_timer -= delta
-	var reviving_now := false
-	if input_captured and Input.is_action_pressed("interact") and state in ["idle", "block", "reviving"]:
-		var target_id: int = game.find_downed_near(global_position, 3.4, peer_id)
-		if target_id != 0:
-			reviving_now = true
-			_revive_target_id = target_id
-			if state != "reviving":
-				state = "reviving"
-				state_time = 0.0
-				_play("PickUp", 1.0)
-			if _revive_send_timer <= 0:
-				_revive_send_timer = 0.15
-				Net.req_revive(target_id)
-	if state == "reviving" and not reviving_now:
-		state = "idle"
-
-	# подсказка взаимодействия (сундук / павший друг)
-	_hint_timer -= delta
-	if _hint_timer <= 0:
-		_hint_timer = 0.2
-		var key: String = game.main.key_name("interact")
-		var downed_id: int = game.find_downed_near(global_position, 3.4, peer_id)
-		var npc_i: int = game.find_npc_near(global_position, 2.6)
-		var qn_id: int = game.find_qnode_near(global_position, 2.6)
-		if downed_id != 0:
-			var dname: String = Net.players[downed_id].name if Net.players.has(downed_id) else tr("союзника")
-			game.hud.set_hint(tr("Держи [%s] — поднять %s") % [key, dname])
-		elif npc_i == 2:
-			game.hud.set_hint(tr("[%s] — нанять мага (%d золота)") % [key, Game.HIRE_COST])
-		elif npc_i == 3:
-			game.hud.set_hint(tr("[%s] — торговать") % key)
-		elif npc_i >= 0:
-			game.hud.set_hint(tr("[%s] — говорить") % key)
-		elif qn_id != 0:
-			game.hud.set_hint(tr("[%s] — взять / разжечь") % key)
-		elif game.find_chest_near(global_position, 2.4) != 0:
-			game.hud.set_hint(tr("[%s] — открыть сундук") % key)
-		else:
-			var poi_hint_idx: int = game.find_poi_near(global_position, 3.2)
-			if poi_hint_idx >= 0:
-				match game.world_pois[poi_hint_idx].kind:
-					"shrine":
-						game.hud.set_hint(tr("[%s] — попросить благословения") % key)
-					"campfire":
-						game.hud.set_hint(tr("[%s] — согреться у костра") % key)
-					"well":
-						game.hud.set_hint(tr("[%s] — испить воды") % key)
-					"bounty_board":
-						game.hud.set_hint(tr("[%s] — принять заказ") % key)
-					_:
-						game.hud.set_hint(tr("[%s] — осмотреть") % key)
-			else:
-				game.hud.set_hint("")
-
-	# перемещение
-	if state != "dodge":
-		if moving and speed_mul > 0:
-			var buff_speed := 1.35 if has_buff("speed") else 1.0
-			var stat_speed: float = Quests.speed_mult_for(Net.players.get(Net.my_id, {})) \
-				* Items.equip_speed_mult(game.my_equip) if is_local else 1.0
-			var speed := (RUN_SPEED if running else WALK_SPEED) * speed_mul * buff_speed * stat_speed
-			velocity.x = _move_dir.x * speed
-			velocity.z = _move_dir.z * speed
-			if state != "block" and state != "attack":
-				facing = rotate_toward(facing, atan2(_move_dir.x, _move_dir.z), TURN_SPEED * delta)
-		else:
-			velocity.x = move_toward(velocity.x, 0, 30 * delta)
-			velocity.z = move_toward(velocity.z, 0, 30 * delta)
-	velocity.y -= GRAVITY * delta
-	move_and_slide()
-	if is_on_floor():
-		velocity.y = 0
-	model.rotation.y = facing
-
-	# локомоция
-	if state == "idle":
-		if moving:
-			_play("Running_A" if running else "Walking_A")
-		else:
-			_play("Idle")
-
-	noise_radius = 22.0 if state == "attack" else (14.0 if (moving and running) else (7.0 if moving else 3.0))
-
-	_send_state(delta)
-
-
-## Адаптивная отправка состояния: 20 Гц в движении, 5 Гц в покое.
-func _send_state(delta: float) -> void:
-	send_timer -= delta
-	if send_timer > 0:
-		return
-	var anim_idx := ANIM_TABLE.find(current_anim)
-	var moved: bool = global_position.distance_squared_to(_last_sent_pos) > 0.0004
-	var anim_changed := anim_idx != _last_sent_anim
-	if not moved and not anim_changed and send_timer > -0.2:
-		return # покой: шлём раз в 0.2 c
-	send_timer = 0.05
-	_last_sent_anim = anim_idx
-	_last_sent_pos = global_position
-	var flags := 0
-	if blocking:
-		flags |= 1
-	if iframes > 0:
-		flags |= 2
-	var pkt := PackedFloat32Array([global_position.x, global_position.z, facing, float(anim_idx), float(flags)])
-	Net.send_player_state(pkt)
-
-
-func _puppet_sim(delta: float) -> void:
-	# павшие и мёртвые не перетираются сетевой локомоцией
-	if state == "dead" or state == "downed":
-		return
-	var target := Vector3(net_pos.x, 0, net_pos.z)
-	global_position = global_position.lerp(target, minf(1.0, 14 * delta))
-	global_position.y = 0
-	facing = lerp_angle(facing, net_rot, minf(1.0, 14 * delta))
-	model.rotation.y = facing
-	if net_anim != "" and net_anim != current_anim:
-		var speed := 1.0
-		if net_anim.contains("Melee_Attack"):
-			speed = 1.3
-			Sfx.play_at("swing", global_position)
-		_play(net_anim, speed)
+		loco.puppet_sim(delta)
 
 
 func apply_net_state(pkt: PackedFloat32Array) -> void:
