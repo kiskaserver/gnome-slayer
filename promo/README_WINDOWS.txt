@@ -1,6 +1,36 @@
-GNOMOBOY — Shards of the Mountain Heart (v4.3.0)
+GNOMOBOY — Shards of the Mountain Heart (v5.0.0)
 ======================================
 
+What's new in 5.0 — Shards of Meaning (major update):
+  - The story got a soul. The Mountain Heart was the world's shared
+    meaning; Dungrim shattered it "so everyone could find their OWN" —
+    and every tribe built an absurd philosophy around its shard. Each
+    chapter is now a school of thought gone mad: nihilists who broke
+    your fences because nothing matters, hedonists frying mushrooms
+    over their shard, stoics who confiscated the firewood, romantic
+    necromancers, a swarm that calls your self an illusion — and
+    Dungrim himself, politely asking you not to fix the Heart
+  - Every shard-keeper delivers their thesis before the fight, and you
+    answer: [1] Steel (+20% XP for the keeper) or [2] Word (the keeper
+    starts doubting: -15% HP, but the idea stays with you). The game
+    keeps score all campaign and delivers a verdict at the end: did
+    you walk this road by Sword or by Thought?
+  - The Chronicler: a tired, sarcastic narrator logs your journey in
+    the event feed — chapter openings, your deaths ("the hero lay down
+    to study the ground up close"), first loot, elites, refuted bosses
+  - Hero origins: start the campaign as a Veteran (+2 STR/+1 VIT,
+    battle axe), Scholar (+2 AGI/+1 LCK, dagger and amulet) or
+    Deserter (crossbow and +40 squad gold) — each with its own
+    greeting from the Chronicler
+  - Fences and props no longer land on paths anywhere; chests and
+    quest objects keep off the roads too; every forest tree now has
+    collision (no more walking through trunks)
+  - Portals find real clearance and stand on a stone dais with
+    torches instead of clipping into objects
+  - Honest line of sight: fireballs hit walls instead of flying
+    through them, crossbow bolts stop at obstacles (and detonate
+    explosive barrels on the way), and gnomes can no longer spot you
+    through walls
 What's new in 4.3 — the Craft of War Update:
   - Interactive tutorial on your first singleplayer campaign: nine guided
     steps (movement, sprint, combo, block & roll, chest, inventory,

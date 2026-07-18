@@ -1,4 +1,4 @@
-GNOMOBOY — Shards of the Mountain Heart (v4.3.0) — PORTABLE EDITION
+GNOMOBOY — Shards of the Mountain Heart (v5.0.0) — PORTABLE EDITION
 ======================================
 
 This is the portable Windows build: everything the game writes — saves,
