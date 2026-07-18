@@ -67,6 +67,7 @@ var portal_mode := "chapter"         # chapter | dungeon_exit
 # сервисы (создаются в _ready): лавка и точки интереса
 var shop_svc: ShopService
 var poi_svc: PoiService
+var combat: CombatRules
 const SECOND_WIND_HP_FRAC := 0.25
 var _second_wind_used: Dictionary = {}  # id игрока -> уже сработало в этом матче
 var nav_region: NavigationRegion3D = null
@@ -215,6 +216,7 @@ func diff() -> Dictionary:
 func _ready() -> void:
 	shop_svc = ShopService.new(self)
 	poi_svc = PoiService.new(self)
+	combat = CombatRules.new(self)
 	if _model_cache.is_empty():
 		for m in ["Knight", "Barbarian", "Mage", "Rogue_Hooded",
 				"Skeleton_Warrior", "Skeleton_Mage", "Skeleton_Minion", "Skeleton_Rogue",
@@ -454,149 +456,26 @@ func find_downed_near(pos: Vector3, radius: float, exclude_id: int) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Урон и нокдаун (сервер)
+# Урон и нокдаун (сервер) — правила в CombatRules (systems/combat_rules.gd)
 # ---------------------------------------------------------------------------
-## Максимально правдоподобный урон одного удара для данного игрока — потолок,
-## которым сервер обрезает присланное клиентом число (защита от читерского
-## dmg: гигантский урон = ваншот, отрицательный = «лечение» цели через минус).
-## Считаем по сильнейшему шагу серии с учётом всех множителей и запасом.
 func _max_melee_dmg(id: int) -> int:
-	var pd: Dictionary = Net.players.get(id, {})
-	# 42 — самый мощный удар (секира), 1.5 — ярость, 1.8 — крит, аффиксы экипировки
-	var top := 42.0 * 1.5 * Quests.dmg_mult_for(pd) * 1.8 * Quests.crit_dmg_mult_for(pd) \
-		* Items.equip_dmg_mult(server_equip.get(id, {}))
-	return int(ceil(top)) + 4  # небольшой запас на округления
+	return combat.max_melee_dmg(id)
 
 
 func server_handle_melee(sender: int, targets: Array, dmg: int, crit: bool) -> void:
-	var sn = player_nodes.get(sender)
-	if sn == null or server_hp.get(sender, 0) <= 0:
-		return # мёртвый/павший игрок не бьёт
-	# доверяем факту удара и списку целей (их сервер перепроверяет по дистанции),
-	# но не доверяем числу урона — обрезаем в разумные серверные рамки
-	dmg = clampi(dmg, 1, _max_melee_dmg(sender))
-	for t in targets:
-		if not (t is Array) or t.size() < 2:
-			continue
-		if t[0] == "g":
-			var g = gnomes.get(int(t[1]))
-			if g != null and g.alive and not g.friendly and g.global_position.distance_to(sn.global_position) < 6.5:
-				g.last_attacker = sender
-				g.last_attacker_gid = 0 # игрок перебил зачёт: последним бил не наёмник
-				g.server_take_damage(dmg, sn.global_position, crit)
-		elif t[0] == "p" and is_pvp():
-			var pid := int(t[1])
-			var pn = player_nodes.get(pid)
-			if pn != null and pn.global_position.distance_to(sn.global_position) < 6.5:
-				server_damage_player(pid, dmg, sn.global_position, sender)
+	combat.server_handle_melee(sender, targets, dmg, crit)
 
 
 func server_damage_player(id: int, dmg: int, from_pos: Vector3, attacker: int = 0) -> void:
-	var node = player_nodes.get(id)
-	if node == null or server_hp.get(id, 0) <= 0 or match_over:
-		return
-	if in_safe_zone(node.global_position):
-		return
-	if node.iframes > 0:
-		Net.bcast("rpc_player_hp", [id, server_hp[id], player_max_hp(id), "dodge", from_pos.x, from_pos.z])
-		return
-	var flag := "hit"
-	if node.blocking:
-		var to_enemy := atan2(from_pos.x - node.global_position.x, from_pos.z - node.global_position.z)
-		if absf(angle_difference(to_enemy, node.facing)) < 1.4:
-			dmg = maxi(1, roundi(dmg * 0.15))
-			flag = "block"
-	# барьер поглощает урон
-	if server_shield.get(id, 0) > 0:
-		var absorb: int = mini(server_shield[id], dmg)
-		server_shield[id] -= absorb
-		dmg -= absorb
-		if server_shield[id] <= 0:
-			server_shield.erase(id)
-			Net.bcast("rpc_buff", [id, "shield_end", 0.0])
-		if dmg <= 0:
-			Net.bcast("rpc_player_hp", [id, server_hp[id], player_max_hp(id), "shield", from_pos.x, from_pos.z])
-			return
-	server_hp[id] = server_hp[id] - dmg
-	Net.bcast("rpc_player_hp", [id, server_hp[id], player_max_hp(id), flag, from_pos.x, from_pos.z])
-	if server_hp[id] <= 0:
-		_server_player_defeated(id, attacker)
-	elif not _second_wind_used.get(id, false) and server_hp[id] <= player_max_hp(id) * SECOND_WIND_HP_FRAC:
-		# первый раз на волоске от смерти за матч — короткий шанс выровняться
-		_second_wind_used[id] = true
-		server_shield[id] = server_shield.get(id, 0) + 40
-		Net.bcast("rpc_buff", [id, "shield", 999.0])
-		Net.bcast("rpc_buff", [id, "rage", 10.0])
-		Net.bcast("rpc_buff", [id, "speed", 10.0])
-		Net.bcast("rpc_banner", ["ВТОРОЕ ДЫХАНИЕ!"])
+	combat.server_damage_player(id, dmg, from_pos, attacker)
 
 
-func _server_player_defeated(id: int, attacker: int) -> void:
-	server_hp[id] = 0
-	if is_pvp():
-		Net.players[id].deaths += 1
-		var ktext := "гномы"
-		if attacker > 0 and Net.players.has(attacker):
-			Net.players[attacker].kills += 1
-			ktext = Net.players[attacker].name
-		Net.bcast("rpc_player_died", [id, ktext])
-		Net.bcast("rpc_scores", [Net.players])
-		respawn_timers[id] = 4.0
-		if attacker > 0 and Net.players[attacker].kills >= PVP_TARGET:
-			# имя подставляет клиент ПОСЛЕ tr() — иначе строка не совпадает с ключом
-			_server_game_over(true, "PVPWIN:%s" % Net.players[attacker].name)
-		return
-
-	# ПвЕ: в мультиплеере — нокдаун, в одиночке — смерть
-	if Net.players.size() > 1:
-		Net.bcast("rpc_player_downed", [id])
-	else:
-		Net.bcast("rpc_player_died", [id, "гномы"])
-	var any_alive := false
-	for pid in server_hp:
-		if server_hp[pid] > 0:
-			any_alive = true
-			break
-	if not any_alive:
-		_server_game_over(false, "ОТРЯД ПАЛ В БОЮ")
-
-
-## Тик поднятия (клиент шлёт, пока держит E рядом с павшим).
 func server_revive_tick(reviver: int, target: int) -> void:
-	if is_pvp() or match_over:
-		return
-	var rn = player_nodes.get(reviver)
-	var tn = player_nodes.get(target)
-	if rn == null or tn == null or server_hp.get(reviver, 0) <= 0 or server_hp.get(target, 1) > 0:
-		return
-	if rn.global_position.distance_to(tn.global_position) > 4.2:
-		return
-	var e: Dictionary = revive_progress.get(target, {"k": 0.0, "idle": 0.0, "by": reviver, "t": 0.0})
-	# прогресс привязан ко времени, а не к числу RPC: спам пакетами не ускоряет
-	# подъём (клиент честно шлёт тик раз в ~0.15 с)
-	var now := Time.get_ticks_msec() / 1000.0
-	if now - float(e.get("t", 0.0)) >= 0.12:
-		e.k += 0.16 * Skills.revive_speed_mult(Net.players.get(reviver, {}))
-		e.t = now
-	e.idle = 0.0
-	e.by = reviver
-	revive_progress[target] = e
-	if e.k >= REVIVE_TIME:
-		revive_progress.erase(target)
-		downed_timers.erase(target)
-		server_hp[target] = player_max_hp(target) / 2
-		Net.bcast("rpc_player_revived", [target, server_hp[target]])
-	else:
-		Net.bcast("rpc_revive_progress", [target, reviver, e.k / REVIVE_TIME])
+	combat.server_revive_tick(reviver, target)
 
 
 func server_heal_player(id: int, amount: int) -> void:
-	if server_hp.get(id, 0) <= 0:
-		return
-	server_hp[id] = mini(player_max_hp(id), server_hp[id] + amount)
-	var node = player_nodes.get(id)
-	var pos: Vector3 = node.global_position if node != null else Vector3.ZERO
-	Net.bcast("rpc_player_hp", [id, server_hp[id], player_max_hp(id), "heal", pos.x, pos.z])
+	combat.server_heal_player(id, amount)
 
 
 func on_player_hp(id: int, hp: int, max_hp: int, flag: String, fx: float, fz: float) -> void:
@@ -1018,28 +897,6 @@ func _update_pvp(delta: float) -> void:
 
 const BLEEDOUT_TIME := 40.0
 var downed_timers: Dictionary = {}
-
-
-func _update_revives(delta: float) -> void:
-	# автоподъём: если павшего так и не подняли — встаёт сам у точки спавна
-	if not is_pvp() and Net.players.size() > 1:
-		for id in server_hp:
-			if server_hp[id] <= 0 and player_nodes.has(id):
-				downed_timers[id] = downed_timers.get(id, 0.0) + delta
-				if downed_timers[id] >= BLEEDOUT_TIME:
-					downed_timers.erase(id)
-					revive_progress.erase(id)
-					server_hp[id] = player_max_hp(id) / 2
-					var pos := _player_spawn_pos()
-					Net.bcast("rpc_player_respawn", [id, pos.x, pos.y])
-			else:
-				downed_timers.erase(id)
-	for id in revive_progress.keys():
-		var e: Dictionary = revive_progress[id]
-		e.idle += delta
-		if e.idle > 0.6: # бросили поднимать
-			revive_progress.erase(id)
-			Net.bcast("rpc_revive_progress", [id, e.by, 0.0])
 
 
 func _server_game_over(win: bool, text: String) -> void:
@@ -3082,7 +2939,7 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_spread_slots(delta)
-	_update_revives(delta)
+	combat.update_revives(delta)
 
 	if restart_timer > 0:
 		restart_timer -= delta
