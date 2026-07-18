@@ -60,18 +60,59 @@ back-ref `game`, Game створює в `_ready` і делегує; зовніш
 - `project.godot` → 4.2.0; `Net.GAME_VERSION` → "4.2" (обов'язково: семантика
   `rpc_game_over` для ПвП змінилась); README + promo оновлені.
 
-## Не зроблено (залишок плану, у порядку плану)
+## Сесія 2 (локальна, 2026-07-18): тест-драйв + M2 повністю + частина M3
 
-- **A2** `main.gd` → menu_builder/settings_ui (~1416 → ціль ≤300).
-- **A3** решта сервісів: combat_rules, spawn_director, loot_system,
-  quest_director, camp_builder, zone_manager (game.gd 3135 → ціль ≤400).
-- **A6** `player.gd` (824) → combat + locomotion.
-- **A7** `gnome.gd` (1321) → visual + ai.
-- **A8** `net.gd` (841) → net_session.
-- **C1-C3** рівень-дизайн (оверворлд ~80, нові типи локацій, теми підземель,
-  тести щільності/зв'язності).
-- **D1-D2** механіки (стаміна, парі, важка атака, статуси…) + туторіал
-  (`--test-tutorial`).
+Гілку веб-сесії влито в `main` (fast-forward з bundle). Далі — локально,
+з Godot 4.7 (`tools/Godot_v4.7-stable_win64_console.exe`), повний тест-драйв
+після кожного кроку (`--import`, `--test`, `--test-story`, `--mphost`+`--mpjoin`).
+
+### Виправлення знахідок веб-сесії
+
+- `hud_dialog.gd:252` — компілятор Godot падав (`Cannot infer the type of "t"`);
+  gdparse цього не ловив. Фікс: явний тип `Tween`.
+- i18n-guard хибно фейлив на легітимно однакових перекладах («Бомба»/«ЛКМ»
+  uk==ru). Фікс: перевірка наявності ключа в каталозі локалі
+  (`get_translation_object().get_message()`), а не `tr(x)==x`.
+- Тестові сейви (`test_*`) переживали запуск: арбалет, вдягнений наприкінці
+  `--test-story`, протікав у наступний прогін і ламав items-тести. Фікс:
+  `_reset_test_saves()` на старті харнеса (`--continue` не чіпає).
+- `.uid` нових скриптів згенеровані й закомічені.
+
+### M2 — A3 повністю (усі сервіси game.gd)
+
+| Сервіс | Файл | Рядків |
+|---|---|---|
+| CombatRules | `systems/combat_rules.gd` | 156 — валідація урону, нокдаун/підйом, Друге дихання, bleedout |
+| SpawnDirector | `systems/spawn_director.gd` | 178 — enemy_level, еліта, спавн від хатин, хвилі ПвЕ, ПвП-підсів |
+| LootSystem | `systems/loot_system.gd` | 291 — сундуки, видача/списання, екіпірування, дропи, пікапи, розхідники |
+| QuestDirector | `systems/quest_director.gd` | 308 — сюжетний FSM, qnodes, найм, портал, тик сюжету |
+| CampBuilder | `systems/camp_builder.gd` | 172 — костер, шатро, НПС табору |
+| ZoneManager | `systems/zone_manager.gd` | 50 — Net.carry, вхід/вихід данжу |
+
+`game.gd`: 3135 → **1727** (решта — клієнтські on_*-хендлери, fx, оркестрація).
+Патерн: RefCounted з back-ref `game`; зовнішні виклики йдуть через делегати.
+
+### M3 — A2 та A8
+
+- **A2**: `ui/menu_builder.gd` (495) — головне меню, розділи, слоти;
+  `ui/settings_ui.gd` (263) — вкладки налаштувань + слайдер/чекбокс.
+  `main.gd`: 1416 → **544** (точка входу, роутинг, ребінд, оверлеї, спільні хелпери).
+- **A8**: `net_session.gd` (106) — start_single/host/client, біом, join-секрет,
+  shutdown, ping. `net.gd`: 841 → **551** (RPC-поверхня + рукопожаття, як і планували).
+
+### Верифікація сесії 2
+
+Кожен сервіс — окремий коміт; після кожного: `--test` і `--test-story` зелені
+(жодного PASS=false/SCRIPT ERROR), МП-смоук (`--mphost`+`--mpjoin`, для quest —
+`--mphoststory` з wipe-restart, для combat — додатково `--revive2`).
+Обмеження headless: `--shot-*` не рендерить (save_png на null) — це властивість
+headless, меню/налаштування при цьому будуються без помилок скриптів.
+
+## Не зроблено (залишок, у порядку плану)
+
+- **A6** `player.gd` (729) → combat + locomotion.
+- **A7** `gnome.gd` (1188) → visual + ai.
+- **C1-C3** рівень-дизайн; **D1-D2** механіки + туторіал (M4-M7).
 
 ## Як верифікувалися перенесення (для наступного виконавця)
 
