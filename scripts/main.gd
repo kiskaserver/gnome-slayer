@@ -109,10 +109,10 @@ func key_name(action: String) -> String:
 	var ev: InputEvent = events[0]
 	if ev is InputEventMouseButton:
 		match ev.button_index:
-			MOUSE_BUTTON_LEFT: return "ЛКМ"
-			MOUSE_BUTTON_RIGHT: return "ПКМ"
-			MOUSE_BUTTON_MIDDLE: return "СКМ"
-			_: return "Мышь %d" % ev.button_index
+			MOUSE_BUTTON_LEFT: return tr("ЛКМ")
+			MOUSE_BUTTON_RIGHT: return tr("ПКМ")
+			MOUSE_BUTTON_MIDDLE: return tr("СКМ")
+			_: return tr("Мышь %d") % ev.button_index
 	if ev is InputEventKey:
 		return OS.get_keycode_string(ev.physical_keycode)
 	return "?"

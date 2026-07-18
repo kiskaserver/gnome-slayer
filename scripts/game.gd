@@ -539,7 +539,8 @@ func _server_player_defeated(id: int, attacker: int) -> void:
 		Net.bcast("rpc_scores", [Net.players])
 		respawn_timers[id] = 4.0
 		if attacker > 0 and Net.players[attacker].kills >= PVP_TARGET:
-			_server_game_over(true, "%s ПОБЕЖДАЕТ!" % Net.players[attacker].name)
+			# имя подставляет клиент ПОСЛЕ tr() — иначе строка не совпадает с ключом
+			_server_game_over(true, "PVPWIN:%s" % Net.players[attacker].name)
 		return
 
 	# ПвЕ: в мультиплеере — нокдаун, в одиночке — смерть
@@ -616,7 +617,7 @@ func on_player_downed(id: int) -> void:
 	if id == Net.my_id:
 		hud.center_msg(tr("Ты пал. Друг может поднять тебя (%s)") % main.key_name("interact"))
 	else:
-		var pname: String = Net.players[id].name if Net.players.has(id) else "Друг"
+		var pname: String = Net.players[id].name if Net.players.has(id) else tr("Друг")
 		hud.add_chat("", tr("⚑ %s пал — подними его (%s)!") % [pname, main.key_name("interact")], true)
 
 
@@ -637,12 +638,12 @@ func on_revive_progress(target_id: int, reviver_id: int, k: float) -> void:
 		print("[TEST] revive-progress rx: target=%d reviver=%d k=%.2f (me=%d)" % [target_id, reviver_id, k, Net.my_id])
 	var pct := int(k * 100)
 	if Net.my_id == target_id:
-		var rname: String = Net.players[reviver_id].name if Net.players.has(reviver_id) else "Друг"
+		var rname: String = Net.players[reviver_id].name if Net.players.has(reviver_id) else tr("Друг")
 		hud.center_msg(tr("%s поднимает тебя... %d%%") % [rname, pct] if k > 0
 			else tr("Ты пал. Друг может поднять тебя (%s)") % main.key_name("interact"))
 		hud.set_revive_progress(k)
 	elif Net.my_id == reviver_id:
-		var tname: String = Net.players[target_id].name if Net.players.has(target_id) else "Друг"
+		var tname: String = Net.players[target_id].name if Net.players.has(target_id) else tr("Друг")
 		hud.center_msg(tr("Поднимаешь %s... %d%%") % [tname, pct] if k > 0 else "")
 		hud.set_revive_progress(k)
 		_reviver_msg_shown = k > 0
@@ -1193,7 +1194,14 @@ func on_game_over(win: bool, text: String) -> void:
 		Sfx.play("victory")
 		for p in player_nodes.values():
 			p.play_victory()
-	hud.banner(tr("ФИНАЛ КАМПАНИИ") if text.begins_with("ENDING:") else tr(text), 4.0)
+	var btext: String
+	if text.begins_with("ENDING:"):
+		btext = tr("ФИНАЛ КАМПАНИИ")
+	elif text.begins_with("PVPWIN:"):
+		btext = tr("%s ПОБЕЖДАЕТ!") % text.substr(7)
+	else:
+		btext = tr(text)
+	hud.banner(btext, 4.0)
 	if not win and is_story():
 		hud.center_msg(tr("Отряд пал. Глава начнётся заново..."))
 	if main != null:

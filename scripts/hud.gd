@@ -976,7 +976,7 @@ func set_inventory(inv: Array) -> void:
 			var def: Dictionary = Game.ITEM_DEFS.get(inv[i].type, {})
 			s.icon.visible = true
 			s.icon.color = def.get("color", Color.GRAY)
-			s.short.text = def.get("short", "?")
+			s.short.text = tr(def.get("short", "?"))
 			s.count.text = "x%d" % inv[i].count if inv[i].count > 1 else ""
 			s.panel.self_modulate = Color(1, 1, 1, 0.9)
 		else:

@@ -80,12 +80,25 @@ static func is_weapon(item: Dictionary) -> bool:
 	return item.get("kind", "") == "weapon"
 
 
+# Названия расходников (дублируют title из Game.ITEM_DEFS: автолоада Game здесь
+# нет, а магазину/инвентарю нужно имя по id). Ключи уже есть в locale CSV.
+const CONSUMABLE_NAMES := {
+	"potion_hp": "Зелье здоровья",
+	"potion_rage": "Зелье ярости",
+	"potion_speed": "Зелье скорости",
+	"bomb": "Бомба",
+	"gold_feast": "Золотой пир",
+}
+
+
 static func def_name(item: Dictionary) -> String:
 	var id: String = item.get("id", "")
 	if WEAPONS.has(id):
 		return WEAPONS[id].name
 	if TRINKETS.has(id):
 		return TRINKETS[id].name
+	if CONSUMABLE_NAMES.has(id):
+		return CONSUMABLE_NAMES[id]
 	return id
 
 
